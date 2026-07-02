@@ -1,0 +1,10 @@
+{
+  "name": "mouse-nav",
+  "version": "1.0.0",
+  "description": "Native macOS helper: reports extra mouse button (back/forward) presses to Glint.",
+  "main": "index.js",
+  "gypfile": true,
+  "dependencies": {
+    "bindings": "^1.5.0"
+  }
+}

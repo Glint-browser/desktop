@@ -1,0 +1,88 @@
+{
+  "name": "glint-browser",
+  "version": "0.1.0",
+  "description": "Glint Browser — a fast, workspace-based browser built on Electron + Chromium",
+  "main": "./out/main/index.js",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "pack:mac": "electron-vite build && electron-builder --mac",
+    "pack:win": "electron-vite build && electron-builder --win",
+    "pack:linux": "electron-vite build && electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.glint.browser",
+    "productName": "Glint Browser",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json",
+      "icon.png"
+    ],
+    "asarUnpack": [
+      "**/*.node",
+      "node_modules/mouse-nav/**"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "icon.png",
+      "extendInfo": {
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "Web URL",
+            "CFBundleURLSchemes": ["http", "https"]
+          }
+        ],
+        "NSUserActivityTypes": ["NSUserActivityTypeBrowsingWeb"]
+      },
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "icon.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "icon": "icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network"
+    }
+  },
+  "dependencies": {
+    "@ghostery/adblocker-electron": "^2.18.1",
+    "@phosphor-icons/react": "^2.1.10",
+    "adm-zip": "^0.5.18",
+    "electron-updater": "^6.3.9",
+    "mouse-nav": "file:native/mouse-nav"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^35.7.5",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sharp": "^0.35.3",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  }
+}

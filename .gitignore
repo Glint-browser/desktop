@@ -1,0 +1,29 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+out
+.vite
+
+# Packaged installers (large binaries — never commit; exceed GitHub's size limit)
+release
+*.dmg
+*.zip
+*.blockmap
+*.exe
+*.AppImage
+*.deb
+
+# Native addon build artifacts (compiled per-machine; rebuilt on install)
+native/**/build
+*.node
+
+# Logs & OS cruft
+*.log
+.DS_Store
+
+# Editor
+.idea
+.vscode/*
+!.vscode/extensions.json
