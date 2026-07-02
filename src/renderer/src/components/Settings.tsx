@@ -1,5 +1,6 @@
 import { useEffect, useState, type JSX } from 'react'
 import {
+  ArrowClockwise,
   Gear,
   IdentificationBadge,
   Info,
@@ -10,7 +11,13 @@ import {
   Trash,
   X
 } from '@phosphor-icons/react'
-import type { AppSettings, ExtensionInfo, SearchEngine, ThemeSource } from '../../../shared/types'
+import type {
+  AppSettings,
+  ExtensionInfo,
+  SearchEngine,
+  ThemeSource,
+  UpdateStatus
+} from '../../../shared/types'
 
 interface Props {
   settings: AppSettings
@@ -425,14 +432,69 @@ function ExtensionsPane({ extensions }: { extensions: ExtensionInfo[] }): JSX.El
 }
 
 function AboutPane(): JSX.Element {
+  const [version, setVersion] = useState<string>('')
+  const [status, setStatus] = useState<UpdateStatus>({ state: 'idle' })
+
+  useEffect(() => {
+    window.browser.getAppVersion().then(setVersion)
+    return window.browser.onUpdateStatus(setStatus)
+  }, [])
+
+  const check = async (): Promise<void> => {
+    setStatus(await window.browser.checkForUpdates())
+  }
+
+  const busy = status.state === 'checking' || status.state === 'downloading'
+
   return (
     <Section title="About">
       <div className="settings-row">
         <div>
           <div className="row-label">Glint Browser</div>
-          <div className="row-desc">A fast, workspace-based browser built on Electron + Chromium.</div>
+          <div className="row-desc">
+            A fast, workspace-based browser built on Electron + Chromium.
+            {version && <> Version {version}.</>}
+          </div>
         </div>
+      </div>
+      <div className="settings-row">
+        <div>
+          <div className="row-label">Updates</div>
+          <div className="row-desc">{updateMessage(status)}</div>
+        </div>
+        {status.state === 'downloaded' ? (
+          <button className="settings-btn" onClick={() => window.browser.installUpdate()}>
+            Restart &amp; install
+          </button>
+        ) : (
+          <button className="settings-btn icon" onClick={check} disabled={busy}>
+            <ArrowClockwise size={14} weight="bold" />
+            <span style={{ marginLeft: 8 }}>{busy ? 'Working…' : 'Check for updates'}</span>
+          </button>
+        )}
       </div>
     </Section>
   )
+}
+
+/** Human-readable line describing the current auto-updater state. */
+function updateMessage(status: UpdateStatus): string {
+  switch (status.state) {
+    case 'checking':
+      return 'Checking for updates…'
+    case 'available':
+      return `Update ${status.version} found — downloading…`
+    case 'downloading':
+      return `Downloading update… ${status.percent}%`
+    case 'downloaded':
+      return `Update ${status.version} is ready to install.`
+    case 'not-available':
+      return 'You’re on the latest version.'
+    case 'unsupported':
+      return 'Updates are available in the installed release build.'
+    case 'error':
+      return `Update check failed: ${status.message}`
+    default:
+      return 'Fetch the newest version from GitHub.'
+  }
 }

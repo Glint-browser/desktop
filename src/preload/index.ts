@@ -7,7 +7,8 @@ import {
   type ContextMenuRequest,
   type FindResult,
   type HistoryEntry,
-  type UiAction
+  type UiAction,
+  type UpdateStatus
 } from '../shared/types'
 
 const api = {
@@ -92,6 +93,14 @@ const api = {
     const listener = (_e: unknown, action: UiAction): void => cb(action)
     ipcRenderer.on(IPC.UI_ACTION, listener)
     return () => ipcRenderer.removeListener(IPC.UI_ACTION, listener)
+  },
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke(IPC.APP_GET_VERSION),
+  checkForUpdates: (): Promise<UpdateStatus> => ipcRenderer.invoke(IPC.UPDATE_CHECK),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke(IPC.UPDATE_INSTALL),
+  onUpdateStatus: (cb: (status: UpdateStatus) => void): (() => void) => {
+    const listener = (_e: unknown, status: UpdateStatus): void => cb(status)
+    ipcRenderer.on(IPC.UPDATE_STATUS, listener)
+    return () => ipcRenderer.removeListener(IPC.UPDATE_STATUS, listener)
   }
 }
 

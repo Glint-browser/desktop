@@ -62,6 +62,18 @@ export interface ExtensionInfo {
 export type ThemeSource = 'system' | 'light' | 'dark'
 export type SearchEngine = 'google' | 'duckduckgo' | 'bing'
 
+/** Progress of the GitHub-backed auto-updater, pushed from main to the renderer. */
+export type UpdateStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string }
+  | { state: 'not-available' }
+  | { state: 'downloading'; percent: number }
+  | { state: 'downloaded'; version: string }
+  | { state: 'error'; message: string }
+  /** Updates only work in a packaged build installed from a release. */
+  | { state: 'unsupported' }
+
 export interface AppSettings {
   theme: ThemeSource
   searchEngine: SearchEngine
@@ -158,9 +170,13 @@ export const IPC = {
   SET_OVERLAY: 'view:setOverlay',
   VIEW_SET_BOUNDS: 'view:setBounds',
   STATE_GET: 'state:get',
+  APP_GET_VERSION: 'app:getVersion',
+  UPDATE_CHECK: 'update:check',
+  UPDATE_INSTALL: 'update:install',
   // main -> renderer (send)
   STATE_CHANGED: 'state:changed',
   UI_ACTION: 'ui:action',
   FIND_RESULT: 'find:result',
-  SETTINGS_CHANGED: 'settings:changed'
+  SETTINGS_CHANGED: 'settings:changed',
+  UPDATE_STATUS: 'update:status'
 } as const

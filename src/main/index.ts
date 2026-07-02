@@ -20,6 +20,7 @@ import * as mouseNav from 'mouse-nav'
 import { buildMenu } from './menu'
 import { loadSession, saveSession, saveSessionDebounced } from './session'
 import { fixSessionHeaders } from './webstore'
+import { checkForUpdates, initUpdater, installUpdate } from './updater'
 import {
   IPC,
   type AppSettings,
@@ -325,6 +326,9 @@ function registerIpc(): void {
   ipcMain.handle(IPC.SET_OVERLAY, (_e, on: boolean) => tabs?.setOverlay(on))
   ipcMain.handle(IPC.VIEW_SET_BOUNDS, (_e, bounds: Bounds) => tabs?.setContentBounds(bounds))
   ipcMain.handle(IPC.STATE_GET, () => tabs?.getState())
+  ipcMain.handle(IPC.APP_GET_VERSION, () => app.getVersion())
+  ipcMain.handle(IPC.UPDATE_CHECK, () => checkForUpdates())
+  ipcMain.handle(IPC.UPDATE_INSTALL, () => installUpdate())
 }
 
 function sendUi(action: UiAction): void {
@@ -518,6 +522,10 @@ app.whenReady().then(() => {
   initExtensions().finally(() => {
     createWindow()
     applySettings(settings.get())
+    // Forward auto-updater progress to the (now-created) window, then check
+    // once in the background so a waiting update surfaces without user action.
+    initUpdater(() => mainWindow)
+    checkForUpdates().catch(() => {})
   })
 
   app.on('activate', () => {

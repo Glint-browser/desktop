@@ -14,7 +14,10 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "pack:mac": "electron-vite build && electron-builder --mac",
     "pack:win": "electron-vite build && electron-builder --win",
-    "pack:linux": "electron-vite build && electron-builder --linux"
+    "pack:linux": "electron-vite build && electron-builder --linux",
+    "publish:mac": "electron-vite build && electron-builder --mac --publish always",
+    "publish:win": "electron-vite build && electron-builder --win --publish always",
+    "publish:linux": "electron-vite build && electron-builder --linux --publish always"
   },
   "build": {
     "appId": "com.glint.browser",
@@ -22,6 +25,13 @@
     "directories": {
       "output": "release"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Glint-browser",
+        "repo": "desktop"
+      }
+    ],
     "files": [
       "out/**/*",
       "package.json",
@@ -49,8 +59,14 @@
         ]
       },
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": "universal"
+        },
+        {
+          "target": "zip",
+          "arch": "universal"
+        }
       ]
     },
     "win": {
