@@ -4,6 +4,9 @@
   "description": "Native macOS helper: reports extra mouse button (back/forward) presses to Glint.",
   "main": "index.js",
   "gypfile": true,
+  "scripts": {
+    "install": "node -e \"if(process.platform==='darwin'){require('child_process').execSync('node-gyp rebuild',{stdio:'inherit'})}\""
+  },
   "dependencies": {
     "bindings": "^1.5.0"
   }

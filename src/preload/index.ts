@@ -11,6 +11,8 @@ import {
 } from '../shared/types'
 
 const api = {
+  // 'darwin' | 'win32' | 'linux' — lets the chrome adapt window-control layout.
+  platform: process.platform,
   createTab: (url?: string): Promise<string> => ipcRenderer.invoke(IPC.TAB_CREATE, url),
   closeTab: (id: string): Promise<void> => ipcRenderer.invoke(IPC.TAB_CLOSE, id),
   activateTab: (id: string): Promise<void> => ipcRenderer.invoke(IPC.TAB_ACTIVATE, id),

@@ -82,8 +82,32 @@ let history: HistoryStore
 let settings: SettingsStore
 let profiles: ProfileStore
 
+// macOS gets translucent vibrancy (the wallpaper shows through); Windows/Linux
+// have no vibrancy, so the chrome needs a solid, theme-matched backdrop or the
+// semi-transparent panels render muddy over a mismatched fill. These colors
+// drive both the window background and the caption-button overlay so the
+// min/max/close controls blend into the toolbar instead of a stray light strip.
+function chromeColors(): { bg: string; symbol: string } {
+  return nativeTheme.shouldUseDarkColors
+    ? { bg: '#1c1b22', symbol: '#e8e6f0' }
+    : { bg: '#f3f1f6', symbol: '#2b2733' }
+}
+
+// Keep the window backdrop + caption overlay in sync with the active theme.
+function refreshWindowChrome(): void {
+  if (process.platform === 'darwin' || !mainWindow) return
+  const { bg, symbol } = chromeColors()
+  mainWindow.setBackgroundColor(bg)
+  try {
+    mainWindow.setTitleBarOverlay({ color: bg, symbolColor: symbol, height: 40 })
+  } catch {
+    // Not all platforms support a runtime overlay update — ignore.
+  }
+}
+
 function applySettings(s: AppSettings): void {
   nativeTheme.themeSource = s.theme
+  refreshWindowChrome()
   tabs?.setSearchEngine(s.searchEngine)
   setFingerprintEnabled(s.fingerprintEnabled)
   setAdblockEnabled(s.adblockEnabled).catch((e) => console.error('adblock:', e))
@@ -97,18 +121,40 @@ function createWindow(): void {
     minWidth: 720,
     minHeight: 480,
     show: false,
-    titleBarStyle: 'hiddenInset',
+    // macOS: inset traffic lights over our chrome. Windows/Linux: hide the OS
+    // title bar and let Chromium paint the min/max/close buttons as an overlay
+    // in the top-right, which our toolbar reserves room for. Using the native
+    // 'hiddenInset' verbatim on Windows falls back to a full framed window
+    // (stray title bar + in-window menu bar), which is what looked broken.
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    ...(isMac
+      ? {}
+      : {
+          titleBarOverlay: {
+            color: chromeColors().bg,
+            symbolColor: chromeColors().symbol,
+            height: 40
+          }
+        }),
+    // The redundant File/Edit/View… bar belongs in the macOS global menu; on
+    // Windows/Linux hide it (Alt still reveals it) so it doesn't eat a row.
+    autoHideMenuBar: !isMac,
     icon: ICON_PATH,
     // macOS vibrancy so the desktop/wallpaper shows through the translucent
     // chrome. Do NOT also set `transparent: true` — it conflicts with vibrancy
     // and produces a flat fill instead of a frosted blur of what's behind.
-    backgroundColor: isMac ? '#00000000' : '#1c1b22',
+    // Windows/Linux have no vibrancy, so use a solid theme-matched backdrop.
+    backgroundColor: isMac ? '#00000000' : chromeColors().bg,
     ...(isMac ? { vibrancy: 'under-window' as const, visualEffectState: 'active' as const } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
     }
   })
+
+  // Safety net: `ready-to-show` can occasionally not fire when the caption
+  // overlay is in play; make sure the window is never left invisible.
+  setTimeout(() => mainWindow?.show(), 3000)
 
   const send = (state: BrowserState): void => {
     mainWindow?.webContents.send(IPC.STATE_CHANGED, state)
@@ -457,6 +503,9 @@ app.whenReady().then(() => {
       // icon file missing — ignore
     }
   }
+  // Keep the Windows/Linux window backdrop + caption overlay in sync when the
+  // OS flips between light and dark (relevant when the app theme is "system").
+  nativeTheme.on('updated', refreshWindowChrome)
   bookmarks = new BookmarkStore()
   history = new HistoryStore()
   settings = new SettingsStore()

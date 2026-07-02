@@ -38,10 +38,15 @@
         "CFBundleURLTypes": [
           {
             "CFBundleURLName": "Web URL",
-            "CFBundleURLSchemes": ["http", "https"]
+            "CFBundleURLSchemes": [
+              "http",
+              "https"
+            ]
           }
         ],
-        "NSUserActivityTypes": ["NSUserActivityTypeBrowsingWeb"]
+        "NSUserActivityTypes": [
+          "NSUserActivityTypeBrowsingWeb"
+        ]
       },
       "target": [
         "dmg",
@@ -50,6 +55,8 @@
     },
     "win": {
       "icon": "icon.png",
+      "sign": false,
+      "signAndEditExecutable": false,
       "target": [
         "nsis"
       ]
@@ -84,5 +91,10 @@
     "sharp": "^0.35.3",
     "typescript": "^5.7.3",
     "vite": "^6.0.7"
+  },
+  "allowScripts": {
+    "electron@35.7.5": true,
+    "esbuild@0.25.12": true,
+    "file:../native/mouse-nav": true
   }
 }

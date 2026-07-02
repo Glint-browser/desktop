@@ -74,8 +74,16 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 12px 0 84px; /* room for macOS traffic lights */
+  padding: 0 12px 0 84px; /* room for macOS traffic lights (top-left) */
   -webkit-app-region: drag;
+}
+
+/* Windows/Linux paint the min/max/close controls as an overlay in the
+   top-right, so there are no left-side traffic lights to clear and the toolbar
+   must instead reserve room on the right for those controls. */
+body.platform-win .topbar,
+body.platform-linux .topbar {
+  padding: 0 140px 0 10px;
 }
 
 .win-space {
