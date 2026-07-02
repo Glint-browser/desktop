@@ -522,10 +522,15 @@ app.whenReady().then(() => {
   initExtensions().finally(() => {
     createWindow()
     applySettings(settings.get())
-    // Forward auto-updater progress to the (now-created) window, then check
-    // once in the background so a waiting update surfaces without user action.
+    // Register the auto-updater's event → renderer bridge. Do NOT check yet:
+    // kicking off a network request on the startup path crashed the packaged
+    // build. The background check runs once the window has finished loading.
     initUpdater(() => mainWindow)
-    checkForUpdates().catch(() => {})
+    // Check once in the background shortly after the window is up, so a waiting
+    // update surfaces without the user having to open Settings.
+    mainWindow?.webContents.once('did-finish-load', () => {
+      setTimeout(() => checkForUpdates().catch(() => {}), 5000)
+    })
   })
 
   app.on('activate', () => {
