@@ -3,6 +3,7 @@ import { StrictMode, useEffect, useState, type JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AppSettings } from './types'
 import { Settings } from './components/Settings'
+import { applyThemeAttribute } from './workspaces'
 import './styles.css'
 
 /** Full-page Vivaldi-style settings: the Settings card floats on the gray
@@ -11,8 +12,12 @@ function SettingsPage(): JSX.Element {
   const [settings, setSettings] = useState<AppSettings | null>(null)
 
   useEffect(() => {
-    window.browser.getSettings().then(setSettings)
-    return window.browser.onSettingsChanged(setSettings)
+    const apply = (s: AppSettings): void => {
+      setSettings(s)
+      applyThemeAttribute(s.theme)
+    }
+    window.browser.getSettings().then(apply)
+    return window.browser.onSettingsChanged(apply)
   }, [])
 
   const close = (): void => {

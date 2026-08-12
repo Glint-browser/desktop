@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import type { BrowserState, ContextMenuRequest, UiAction } from './types'
 import { Sidebar } from './components/Sidebar'
+import { applyThemeAttribute } from './workspaces'
 
 const EMPTY: BrowserState = {
   spaces: [],
@@ -69,14 +70,15 @@ export default function App(): JSX.Element {
 
   // Apply the sidebar wash from settings, same as the Electron shell.
   useEffect(() => {
-    const apply = (opacity: number): void => {
+    const apply = (s: { sidebarOpacity: number; theme: 'system' | 'light' | 'dark' }): void => {
       document.documentElement.style.setProperty(
         '--sidebar-wash',
-        `rgba(255, 255, 255, ${opacity})`
+        `rgba(255, 255, 255, ${s.sidebarOpacity})`
       )
+      applyThemeAttribute(s.theme)
     }
-    window.browser.getSettings().then((s) => apply(s.sidebarOpacity))
-    return window.browser.onSettingsChanged((s) => apply(s.sidebarOpacity))
+    window.browser.getSettings().then(apply)
+    return window.browser.onSettingsChanged(apply)
   }, [])
 
   // Workspace switch direction drives the Arc-style slide animation.

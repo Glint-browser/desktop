@@ -21,33 +21,6 @@ import {
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {})
 
-// Schibsted CMP blocker (network half): dynamic DNR rules — no static
-// ruleset indexing/checksums involved. The cosmetic half is css/schibsted.css.
-const SCHIBSTED_RULES: chrome.declarativeNetRequest.Rule[] = [
-  '||cmp.vg.no^',
-  '||cmp.aftenposten.no^',
-  '||static.privacy.schibsted.com^',
-  '||cdn.privacy.schibsted.com^'
-].map((urlFilter, i) => ({
-  id: 9001 + i,
-  priority: 1,
-  action: { type: 'block' as chrome.declarativeNetRequest.RuleActionType },
-  condition: { urlFilter }
-}))
-
-async function ensureSchibstedRules(): Promise<void> {
-  try {
-    await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: SCHIBSTED_RULES.map((r) => r.id),
-      addRules: SCHIBSTED_RULES
-    })
-  } catch {
-    // DNR unavailable — nothing to do.
-  }
-}
-
-chrome.runtime.onInstalled.addListener(() => void ensureSchibstedRules())
-chrome.runtime.onStartup.addListener(() => void ensureSchibstedRules())
 
 chrome.runtime.onInstalled.addListener(() => void reconcileWorkspaces().catch(() => {}))
 chrome.runtime.onStartup.addListener(() => void reconcileWorkspaces().catch(() => {}))

@@ -441,10 +441,20 @@ function profileColor(name: string): string {
 function ProfilesPane(): JSX.Element {
   // The native side appends the current Glint profile list when it opens
   // this window (settings.html?glintProfiles=a,b,c).
-  const glintProfiles = (new URLSearchParams(window.location.search).get('glintProfiles') ?? '')
-    .split(',')
-    .map((s) => decodeURIComponent(s))
-    .filter(Boolean)
+  const [glintProfiles, setGlintProfiles] = useState<string[]>(() =>
+    (new URLSearchParams(window.location.search).get('glintProfiles') ?? '')
+      .split(',')
+      .map((s) => decodeURIComponent(s))
+      .filter(Boolean)
+  )
+
+  const removeProfile = (name: string): void => {
+    if (!window.confirm(`Delete the profile "${name}"? Its logins and data are removed.`)) {
+      return
+    }
+    applyNative(`delete-profile/${encodeURIComponent(name)}`)
+    setGlintProfiles((list) => list.filter((n) => n !== name))
+  }
 
   return (
     <>
@@ -468,6 +478,13 @@ function ProfilesPane(): JSX.Element {
                 {name.slice(0, 4).toUpperCase()}
               </span>
               <span className="row-label">{name}</span>
+              <button
+                className="settings-btn danger icon"
+                title={`Delete "${name}"`}
+                onClick={() => removeProfile(name)}
+              >
+                <Trash size={14} />
+              </button>
             </div>
           ))
         )}

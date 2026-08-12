@@ -11,32 +11,7 @@
     "storage",
     "sidePanel",
     "favicon",
-    "management",
-    "declarativeNetRequest"
-  ],
-  "content_scripts": [
-    {
-      "matches": [
-        "*://*.vg.no/*",
-        "*://*.aftenposten.no/*",
-        "*://*.bt.no/*",
-        "*://*.aftenbladet.no/*",
-        "*://*.e24.no/*",
-        "*://*.tek.no/*",
-        "*://*.tu.no/*",
-        "*://*.digi.no/*",
-        "*://*.shifter.no/*",
-        "*://*.minmote.no/*",
-        "*://*.godt.no/*",
-        "*://*.vektklubb.no/*",
-        "*://*.finn.no/*",
-        "*://*.prisjakt.no/*"
-      ],
-      "css": [
-        "css/schibsted.css"
-      ],
-      "run_at": "document_start"
-    }
+    "management"
   ],
   "background": {
     "service_worker": "background.js",

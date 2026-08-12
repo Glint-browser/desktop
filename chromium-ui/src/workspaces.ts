@@ -334,3 +334,14 @@ export function workspaceByGroup(workspaces: Workspace[]): Map<number, string> {
   }
   return map
 }
+
+/** Applies the Glint theme setting to the document (explicit beats OS). */
+export function applyThemeAttribute(theme: 'system' | 'light' | 'dark'): void {
+  const resolved =
+    theme === 'system'
+      ? window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light'
+      : theme
+  document.documentElement.dataset.theme = resolved
+}

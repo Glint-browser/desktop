@@ -1615,3 +1615,35 @@ body {
 .dot {
   opacity: 0.4;
 }
+
+/* ================= Explicit theme override (Glint settings) =================
+   The panel/settings follow the Glint Appearance setting via
+   documentElement.dataset.theme — attribute blocks beat the OS media query. */
+
+:root[data-theme='dark'] {
+  --text: #e8e6f0;
+  --text-dim: #9a95ad;
+  --panel: rgba(255, 255, 255, 0.08);
+  --panel-strong: rgba(38, 36, 48, 0.92);
+  --hover: rgba(255, 255, 255, 0.08);
+  --active: rgba(255, 255, 255, 0.16);
+  --divider: rgba(255, 255, 255, 0.1);
+  --content-bg: #16141d;
+  --shadow: rgba(0, 0, 0, 0.45);
+  --sidebar-wash: rgba(255, 255, 255, 0.04);
+  --panel-bg: #1b1922;
+}
+
+:root[data-theme='light'] {
+  --text: #2b2733;
+  --text-dim: #6b6675;
+  --panel: rgba(255, 255, 255, 0.4);
+  --panel-strong: rgba(255, 255, 255, 0.85);
+  --hover: rgba(0, 0, 0, 0.05);
+  --active: rgba(255, 255, 255, 0.72);
+  --divider: rgba(0, 0, 0, 0.1);
+  --content-bg: #ffffff;
+  --shadow: rgba(0, 0, 0, 0.18);
+  --sidebar-wash: rgba(255, 255, 255, 0.06);
+  --panel-bg: #f0eff4;
+}
