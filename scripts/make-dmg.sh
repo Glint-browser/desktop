@@ -1,0 +1,45 @@
+#!/bin/bash
+# Packages the Glint release build into a distributable .dmg.
+# Run after: autoninja -C ~/chromium/src/out/glint-release chrome
+set -euo pipefail
+
+SRC="$HOME/chromium/src"
+OUT="$SRC/out/glint-release"
+APP="$OUT/Glint.app"
+
+[ -d "$APP" ] || { echo "No app at $APP — build first."; exit 1; }
+
+# 1) Bake the Glint component extensions into the bundle.
+#    chrome::DIR_RESOURCES on macOS resolves inside the FRAMEWORK bundle
+#    (Glint Framework.framework/Versions/<v>/Resources), not the app's
+#    Contents/Resources.
+FRAMEWORK=$(/bin/ls -d "$APP/Contents/Frameworks/"*.framework | head -1)
+RES=$(/bin/ls -d "$FRAMEWORK/Versions/"*/Resources 2>/dev/null | head -1)
+[ -d "$RES" ] || { echo "No framework Resources dir found"; exit 1; }
+for c in glint_ui glint_ublock glint_schibsted; do
+  [ -d "$SRC/chrome/browser/resources/$c" ] || { echo "missing $c"; exit 1; }
+  rm -rf "$RES/$c"
+  cp -R "$SRC/chrome/browser/resources/$c" "$RES/$c"
+  echo "baked: $c"
+done
+
+# 2) Re-sign ad-hoc: baking resources broke the bundle seals. No hardened
+#    runtime => no entitlement/library-validation concerns.
+codesign --force --deep --sign - "$APP" 2>&1 | tail -1 || true
+
+# 3) Wrap in a dmg with an Applications shortcut.
+VER=$(defaults read "$APP/Contents/Info" CFBundleShortVersionString)
+DMG="$HOME/Desktop/Glint-$VER-arm64.dmg"
+rm -f "$DMG"
+"$SRC/chrome/installer/mac/pkg-dmg" \
+  --source /var/empty \
+  --target "$DMG" \
+  --format UDBZ \
+  --volname "Glint" \
+  --copy "$APP:/Glint.app" \
+  --symlink /Applications:/Applications
+
+echo
+echo "Done: $DMG"
+echo "Unsigned build — recipients must right-click Glint.app -> Open (twice)"
+echo "the first time, or run: xattr -cr /Applications/Glint.app"
