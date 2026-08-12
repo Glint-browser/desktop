@@ -1683,17 +1683,19 @@ body {
 }
 
 .dl-pop {
-  position: absolute;
-  bottom: 34px;
-  left: -4px;
-  width: 252px;
+  /* The popover lives inside the side panel's own viewport and can never
+     overflow it — span the panel width instead of a fixed 252px. */
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: 44px;
   z-index: 50;
   padding: 8px;
   border-radius: 12px;
   background: var(--panel-strong);
   backdrop-filter: blur(20px);
   border: 1px solid var(--divider);
-  box-shadow: 0 12px 40px var(--shadow);
+  box-shadow: 0 8px 28px var(--shadow);
 }
 
 .dl-head {
