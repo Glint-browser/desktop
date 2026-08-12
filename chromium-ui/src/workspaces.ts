@@ -182,14 +182,19 @@ export async function reconcileWorkspaces(windowId?: number): Promise<WorkspaceS
   // The focused tab is ground truth: the user is IN the workspace that owns
   // the active tab's group (missed follow events — e.g. session restore or
   // cross-profile tabs — otherwise leave the sidebar showing the wrong one).
-  try {
-    const [activeTab] = await chrome.tabs.query({ windowId: win, active: true })
-    if (activeTab && activeTab.groupId !== undefined && activeTab.groupId !== -1) {
-      const owner = workspaces.find((w) => w.groupId === activeTab.groupId)
-      if (owner) active = owner.id
+  // Exception: a deliberately selected EMPTY workspace stays selected — the
+  // old tab keeps focus (there is nothing to focus here yet).
+  const activeEntry = workspaces.find((w) => w.id === active)
+  if (!activeEntry || activeEntry.groupId !== null) {
+    try {
+      const [activeTab] = await chrome.tabs.query({ windowId: win, active: true })
+      if (activeTab && activeTab.groupId !== undefined && activeTab.groupId !== -1) {
+        const owner = workspaces.find((w) => w.groupId === activeTab.groupId)
+        if (owner) active = owner.id
+      }
+    } catch {
+      // window mid-teardown
     }
-  } catch {
-    // window mid-teardown
   }
 
   // Only persist when something actually changed — reconcile runs on every
@@ -225,20 +230,11 @@ export async function activateWorkspace(id: string, windowId?: number): Promise<
   if (!ws) return
 
   if (ws.groupId === null) {
-    materializing = true
-    try {
-      const tab = await chrome.tabs.create({ active: true, windowId: win })
-      const groupId = await chrome.tabs.group({ tabIds: [tab.id!] })
-      await chrome.tabGroups.update(groupId, {
-        title: ws.name,
-        color: groupColorFor(ws.color)
-      })
-      ws.groupId = groupId
-      await saveWorkspaces(state.workspaces, id)
-      await rememberTab(id, tab.id!)
-    } finally {
-      materializing = false
-    }
+    // Switching to an empty workspace shows it EMPTY — no tab is created
+    // (the scroll gesture cycles past empty workspaces without side
+    // effects). The first tab opened here materializes the group via the
+    // background adoption listener.
+    await saveWorkspaces(state.workspaces, id)
     return
   }
 
