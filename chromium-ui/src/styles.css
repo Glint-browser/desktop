@@ -1669,3 +1669,128 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
+
+/* ---------- Downloads popover ---------- */
+.dl-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.dl-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.dl-pop {
+  position: absolute;
+  bottom: 34px;
+  left: -4px;
+  width: 252px;
+  z-index: 50;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--panel-strong);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--divider);
+  box-shadow: 0 12px 40px var(--shadow);
+}
+
+.dl-head {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 4px 8px 8px;
+}
+
+.dl-empty {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 4px 8px 8px;
+}
+
+.dl-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.dl-row:hover {
+  background: var(--hover);
+}
+
+.dl-row.broken .dl-name {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.dl-name {
+  flex: 1;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dl-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.dl-show {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+}
+
+.dl-row:hover .dl-show {
+  opacity: 1;
+}
+
+.dl-show:hover {
+  background: var(--active);
+  color: var(--text);
+}
+
+.dl-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: #4a7dfc;
+  transition: width 0.4s ease;
+}
+
+.dl-all {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dl-all:hover {
+  background: var(--hover);
+  color: var(--text);
+}

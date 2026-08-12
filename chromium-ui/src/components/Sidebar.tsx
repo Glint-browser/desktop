@@ -1,5 +1,5 @@
 import { useEffect, useState, type DragEvent, type JSX } from 'react'
-import { Check, DownloadSimple, FolderPlus, LinkSimple, Plus, Star } from '@phosphor-icons/react'
+import { Check, DownloadSimple, FolderOpen, FolderPlus, LinkSimple, Plus, Star } from '@phosphor-icons/react'
 import type { BrowserState, TabState } from '../types'
 import { TabItem } from './TabItem'
 import { PinnedBookmarks } from './PinnedBookmarks'
@@ -221,13 +221,7 @@ function BottomBar({ state }: { state: BrowserState }): JSX.Element {
   }, [])
   return (
     <div className="bottom-bar">
-      <button
-        className={`bottom-add bottom-dl${downloading ? ' active' : ''}`}
-        title="Downloads"
-        onClick={() => chrome.tabs.create({ url: 'chrome://downloads' })}
-      >
-        <DownloadSimple size={16} />
-      </button>
+      <DownloadsButton downloading={downloading} />
       <div className="space-dots">
         {state.spaces.map((s) => (
           <button
@@ -349,4 +343,125 @@ function displayUrl(active: TabState | null): string {
   } catch {
     return active.url
   }
+}
+
+
+/** Bottom-left downloads button with a Glint-styled popover (no page jump). */
+function DownloadsButton({ downloading }: { downloading: boolean }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="dl-wrap">
+      {open && <DownloadsPopover onClose={() => setOpen(false)} />}
+      <button
+        className={`bottom-add bottom-dl${downloading ? ' active' : ''}`}
+        title="Downloads"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <DownloadSimple size={16} />
+      </button>
+    </span>
+  )
+}
+
+function basename(path: string): string {
+  const i = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return i === -1 ? path : path.slice(i + 1)
+}
+
+function prettyBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return ''
+  const units = ['B', 'kB', 'MB', 'GB']
+  let u = 0
+  while (n >= 1024 && u < units.length - 1) {
+    n /= 1024
+    u++
+  }
+  return `${n.toFixed(n >= 10 || u === 0 ? 0 : 1)} ${units[u]}`
+}
+
+function DownloadsPopover({ onClose }: { onClose: () => void }): JSX.Element {
+  const [items, setItems] = useState<chrome.downloads.DownloadItem[]>([])
+
+  useEffect(() => {
+    let alive = true
+    const refresh = (): void => {
+      chrome.downloads
+        .search({ orderBy: ['-startTime'], limit: 8 })
+        .then((list) => {
+          if (alive) setItems(list.filter((d) => d.filename))
+        })
+        .catch(() => {})
+    }
+    refresh()
+    const tick = setInterval(refresh, 600)
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      alive = false
+      clearInterval(tick)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
+  return (
+    <>
+      <div className="dl-backdrop" onMouseDown={onClose} />
+      <div className="dl-pop">
+        <div className="dl-head">Downloads</div>
+        {items.length === 0 && <div className="dl-empty">No downloads yet</div>}
+        {items.map((d) => {
+          const active = d.state === 'in_progress'
+          const pct =
+            active && d.totalBytes > 0
+              ? Math.round((d.bytesReceived / d.totalBytes) * 100)
+              : null
+          return (
+            <div
+              key={d.id}
+              className={`dl-row${d.state === 'interrupted' ? ' broken' : ''}`}
+              title={d.filename}
+              onClick={() => {
+                if (d.state === 'complete') chrome.downloads.open(d.id)
+              }}
+            >
+              <span className="dl-name">{basename(d.filename)}</span>
+              {active ? (
+                <span className="dl-meta">
+                  {pct !== null ? `${pct}%` : prettyBytes(d.bytesReceived)}
+                </span>
+              ) : (
+                <span className="dl-meta">
+                  {d.state === 'interrupted' ? 'Failed' : prettyBytes(d.fileSize)}
+                </span>
+              )}
+              <button
+                className="dl-show"
+                title="Show in Finder"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  chrome.downloads.show(d.id)
+                }}
+              >
+                <FolderOpen size={14} />
+              </button>
+              {active && pct !== null && (
+                <span className="dl-bar" style={{ width: `${pct}%` }} />
+              )}
+            </div>
+          )
+        })}
+        <button
+          className="dl-all"
+          onClick={() => {
+            chrome.tabs.create({ url: 'chrome://downloads' })
+            onClose()
+          }}
+        >
+          View all downloads
+        </button>
+      </div>
+    </>
+  )
 }
