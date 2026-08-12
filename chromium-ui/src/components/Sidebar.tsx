@@ -108,23 +108,29 @@ export function Sidebar({
 
   const hasBookmarks = state.bookmarks.length > 0 || state.bookmarkFolders.length > 0
 
+  // Rename may target a not-yet-active space (Zen-style rename from a dot):
+  // resolve it independently of activeSpace so the input survives the switch.
+  const renamingSpace = renamingSpaceId
+    ? (state.spaces.find((s) => s.id === renamingSpaceId) ?? null)
+    : null
+
   return (
     <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
       <div className="sidebar-inner">
       <AddressBar active={active} bookmarks={state.bookmarks} />
 
       <div
-        key={state.activeSpaceId ?? 'none'}
+        key={renamingSpaceId ?? state.activeSpaceId ?? 'none'}
         className={`space-pane${slide ? ` slide-${slide}` : ''}`}
       >
       <Favorites pinnedTabs={favoriteTabs} activeTabId={state.activeTabId} />
 
       <div className="space-header">
-        {activeSpace && renamingSpaceId === activeSpace.id ? (
+        {renamingSpace ? (
           <InlineRename
-            initial={activeSpace.name}
+            initial={renamingSpace.name}
             onSubmit={(name) => {
-              window.browser.renameSpace(activeSpace.id, name)
+              window.browser.renameSpace(renamingSpace.id, name)
               onRenameDone()
             }}
             onCancel={onRenameDone}

@@ -14,8 +14,15 @@ export function InlineRename({
   const ref = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    ref.current?.focus()
-    ref.current?.select()
+    const grab = (): void => {
+      ref.current?.focus()
+      ref.current?.select()
+    }
+    grab()
+    // Late default-focus handling from the opening click can still land on
+    // <body> right after mount; take focus back on the next frame.
+    const raf = requestAnimationFrame(grab)
+    return () => cancelAnimationFrame(raf)
   }, [])
 
   return (

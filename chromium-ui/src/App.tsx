@@ -243,6 +243,10 @@ function ContextMenu({
             key={item.label}
             className={`context-item${item.danger ? ' danger' : ''}`}
             onMouseDown={(e) => {
+              // preventDefault: the click's default focus handling would
+              // otherwise blur (and cancel) an inline-rename input that the
+              // action just mounted.
+              e.preventDefault()
               e.stopPropagation()
               item.run()
               onClose()
