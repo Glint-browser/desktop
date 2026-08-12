@@ -25,7 +25,10 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => 
 chrome.runtime.onInstalled.addListener(() => void reconcileWorkspaces().catch(() => {}))
 chrome.runtime.onStartup.addListener(() => void reconcileWorkspaces().catch(() => {}))
 
-// The active workspace follows whatever tab the user lands on.
+// The active workspace follows whatever tab the user lands on — EXCEPT when
+// the current workspace just lost its last tab: Chromium then auto-focuses a
+// neighbour in another group, which is a side effect of the close, not a
+// switch. In that case the (now empty) workspace stays selected.
 chrome.tabs.onActivated.addListener(async (info) => {
   try {
     const tab = await chrome.tabs.get(info.tabId)
@@ -37,9 +40,18 @@ chrome.tabs.onActivated.addListener(async (info) => {
     const map = (wsLastActive as Record<string, number>) ?? {}
     map[wsId] = info.tabId
     await chrome.storage.session.set({ wsLastActive: map })
-    if (wsId !== activeId) {
-      await chrome.storage.local.set({ activeWorkspaceId: wsId })
+    if (wsId === activeId) return
+
+    const activeWs = workspaces.find((w) => w.id === activeId)
+    if (activeWs && activeWs.groupId !== null) {
+      const groups = await chrome.tabGroups.query({ windowId: tab.windowId })
+      if (!groups.some((g) => g.id === activeWs.groupId)) {
+        return // the active workspace just emptied — hold the selection
+      }
+    } else if (activeWs) {
+      return // deliberately parked on an empty workspace — hold
     }
+    await chrome.storage.local.set({ activeWorkspaceId: wsId })
   } catch {
     // tab already gone
   }
