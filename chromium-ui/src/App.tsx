@@ -91,6 +91,34 @@ export default function App(): JSX.Element {
     prevSpace.current = { id: state.activeSpaceId, index: Math.max(0, index) }
   }, [state.activeSpaceId, state.spaces])
 
+  // Zen-style gesture: horizontal scroll over the sidebar switches
+  // workspace. Lives in the panel, so it only fires with the pointer here.
+  useEffect(() => {
+    let acc = 0
+    let lastTrigger = 0
+    let lastEvent = 0
+    const onWheel = (e: WheelEvent): void => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return
+      const now = Date.now()
+      if (now - lastEvent > 250) acc = 0
+      lastEvent = now
+      acc += e.deltaX
+      e.preventDefault()
+      if (now - lastTrigger < 420 || Math.abs(acc) < 60) return
+      const dir = acc > 0 ? 1 : -1
+      acc = 0
+      lastTrigger = now
+      if (state.spaces.length < 2) return
+      const idx = state.spaces.findIndex((s) => s.id === state.activeSpaceId)
+      if (idx === -1) return
+      const next =
+        state.spaces[(idx + dir + state.spaces.length) % state.spaces.length]
+      void window.browser.activateSpace(next.id)
+    }
+    window.addEventListener('wheel', onWheel, { passive: false })
+    return () => window.removeEventListener('wheel', onWheel)
+  }, [state.spaces, state.activeSpaceId])
+
   const spaceTabs = state.tabs.filter((t) => t.spaceId === state.activeSpaceId)
   const active = spaceTabs.find((t) => t.id === state.activeTabId) ?? null
 
