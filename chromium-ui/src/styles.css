@@ -1796,3 +1796,78 @@ body {
   background: var(--hover);
   color: var(--text);
 }
+
+/* ---- In-panel dialogs (prompt/confirm are suppressed in side panels) ---- */
+.dlg-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 320;
+  background: rgba(0, 0, 0, 0.28);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.dlg-card {
+  margin-top: 110px;
+  width: calc(100% - 28px);
+  max-width: 300px;
+  background: var(--panel-strong);
+  border: 1px solid var(--divider);
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 12px 32px var(--shadow);
+  backdrop-filter: blur(18px);
+}
+.dlg-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+.dlg-text {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+.dlg-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  padding: 7px 9px;
+  outline: none;
+  margin-bottom: 12px;
+}
+.dlg-input:focus {
+  border-color: var(--accent, #6d5bd0);
+}
+.dlg-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.dlg-btn {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--divider);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+.dlg-btn:hover {
+  background: var(--hover);
+}
+.dlg-btn.primary {
+  background: var(--accent, #6d5bd0);
+  border-color: var(--accent, #6d5bd0);
+  color: #fff;
+}
+.dlg-btn.danger {
+  background: #e5484d;
+  border-color: #e5484d;
+  color: #fff;
+}
