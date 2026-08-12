@@ -1,0 +1,19 @@
+/* Schibsted Blocker (github.com/BarniKjellerenXD/Schibsted-blocker-Ublock):
+   hides the "pay-to-reject" CMP popup and undoes its scroll locks.
+   Sourcepoint locks scrolling on BOTH <html> (sp-message-open class) and
+   <body> — the original list only unlocked body, leaving pages
+   unscrollable. */
+div[id^="sp_message_container"],
+iframe[id^="sp_message_iframe"] {
+  display: none !important;
+}
+
+html,
+body,
+html.sp-message-open,
+html.sp-message-open body {
+  position: static !important;
+  overflow: auto !important;
+  height: auto !important;
+  top: auto !important;
+}

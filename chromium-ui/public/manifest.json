@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Glint UI",
+  "version": "0.1.1",
+  "description": "Glint sidebar \u2014 spaces, tabs, favorites, bookmarks. The Glint browser UI running natively on Chromium.",
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "bookmarks",
+    "history",
+    "storage",
+    "sidePanel",
+    "favicon",
+    "management",
+    "declarativeNetRequest"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.vg.no/*",
+        "*://*.aftenposten.no/*",
+        "*://*.bt.no/*",
+        "*://*.aftenbladet.no/*",
+        "*://*.e24.no/*",
+        "*://*.tek.no/*",
+        "*://*.tu.no/*",
+        "*://*.digi.no/*",
+        "*://*.shifter.no/*",
+        "*://*.minmote.no/*",
+        "*://*.godt.no/*",
+        "*://*.vektklubb.no/*",
+        "*://*.finn.no/*",
+        "*://*.prisjakt.no/*"
+      ],
+      "css": [
+        "css/schibsted.css"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open Glint sidebar"
+  }
+}
