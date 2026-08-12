@@ -21,9 +21,7 @@ interface MenuState {
   req: ContextMenuRequest
 }
 
-type DialogState =
-  | { mode: 'rename-space'; id: string; initial: string }
-  | { mode: 'delete-space'; id: string; name: string; tabCount: number }
+type DialogState = { mode: 'delete-space'; id: string; name: string; tabCount: number }
 
 /**
  * Side-panel shell for the Glint UI (Chromium port). The Electron app's window
@@ -32,8 +30,6 @@ type DialogState =
  */
 export default function App(): JSX.Element {
   const [state, setState] = useState<BrowserState>(EMPTY)
-  const stateRef = useRef(state)
-  stateRef.current = state
   const [rename, setRename] = useState<{ kind: 'space' | 'folder'; id: string } | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [dialog, setDialog] = useState<DialogState | null>(null)
@@ -48,12 +44,8 @@ export default function App(): JSX.Element {
     const offUi = window.browser.onUiAction((action: UiAction) => {
       // The command palette is native in the Chromium fork (⌘T) — the panel
       // only handles rename actions.
-      if (action.type === 'rename-space') {
-        const space = stateRef.current.spaces.find((s) => s.id === action.id)
-        setDialog({ mode: 'rename-space', id: action.id, initial: space?.name ?? '' })
-      } else if (action.type === 'rename-folder') {
-        setRename({ kind: 'folder', id: action.id })
-      }
+      if (action.type === 'rename-space') setRename({ kind: 'space', id: action.id })
+      else if (action.type === 'rename-folder') setRename({ kind: 'folder', id: action.id })
     })
     return () => {
       offState()
@@ -204,8 +196,12 @@ function ContextMenu({
   } else if (req.kind === 'space') {
     const space = state.spaces.find((s) => s.id === req.id)
     items.push({
-      label: 'Rename Space…',
-      run: () => onDialog({ mode: 'rename-space', id: req.id, initial: space?.name ?? '' })
+      label: 'Rename Space',
+      run: () => {
+        // Zen-style: switch to the space and edit its name in place.
+        if (req.id !== state.activeSpaceId) void window.browser.activateSpace(req.id)
+        onRename('space', req.id)
+      }
     })
     items.push({
       label: 'Change color',
@@ -260,8 +256,8 @@ function ContextMenu({
   )
 }
 
-/** In-panel modal — Chrome suppresses window.prompt/confirm in side panels,
- *  so space rename/delete use a Glint-styled dialog instead. */
+/** In-panel confirm — Chrome suppresses window.confirm in side panels, so
+ *  space deletion gets a Glint-styled dialog (rename is inline, Zen-style). */
 function GlintDialog({
   dialog,
   onClose
@@ -269,20 +265,8 @@ function GlintDialog({
   dialog: DialogState
   onClose: () => void
 }): JSX.Element {
-  const [value, setValue] = useState(dialog.mode === 'rename-space' ? dialog.initial : '')
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    inputRef.current?.select()
-  }, [])
-
   const submit = (): void => {
-    if (dialog.mode === 'rename-space') {
-      const name = value.trim()
-      if (name) void window.browser.renameSpace(dialog.id, name)
-    } else {
-      void window.browser.deleteSpace(dialog.id)
-    }
+    void window.browser.deleteSpace(dialog.id)
     onClose()
   }
 
@@ -297,38 +281,20 @@ function GlintDialog({
       }}
     >
       <div className="dlg-card">
-        {dialog.mode === 'rename-space' ? (
-          <>
-            <div className="dlg-title">Rename Space</div>
-            <input
-              ref={inputRef}
-              className="dlg-input"
-              value={value}
-              autoFocus
-              onChange={(e) => setValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submit()
-              }}
-            />
-            <div className="dlg-actions">
-              <button className="dlg-btn" onClick={onClose}>Cancel</button>
-              <button className="dlg-btn primary" onClick={submit}>Rename</button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="dlg-title">Delete “{dialog.name}”?</div>
-            <div className="dlg-text">
-              {dialog.tabCount > 0
-                ? `This closes its ${dialog.tabCount} tab${dialog.tabCount === 1 ? '' : 's'}.`
-                : 'The space is empty.'}
-            </div>
-            <div className="dlg-actions">
-              <button className="dlg-btn" onClick={onClose}>Cancel</button>
-              <button className="dlg-btn danger" onClick={submit}>Delete</button>
-            </div>
-          </>
-        )}
+        <div className="dlg-title">Delete “{dialog.name}”?</div>
+        <div className="dlg-text">
+          {dialog.tabCount > 0
+            ? `This closes its ${dialog.tabCount} tab${dialog.tabCount === 1 ? '' : 's'}.`
+            : 'The space is empty.'}
+        </div>
+        <div className="dlg-actions">
+          <button className="dlg-btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="dlg-btn danger" onClick={submit}>
+            Delete
+          </button>
+        </div>
       </div>
     </div>
   )
