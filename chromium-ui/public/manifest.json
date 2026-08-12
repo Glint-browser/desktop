@@ -11,7 +11,8 @@
     "storage",
     "sidePanel",
     "favicon",
-    "management"
+    "management",
+    "downloads"
   ],
   "background": {
     "service_worker": "background.js",

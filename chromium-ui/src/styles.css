@@ -1647,3 +1647,25 @@ body {
   --sidebar-wash: rgba(255, 255, 255, 0.06);
   --panel-bg: #f0eff4;
 }
+
+/* Downloads button (bottom-left): pulsing dot while a download runs. */
+.bottom-dl {
+  position: relative;
+}
+
+.bottom-dl.active::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4a7dfc;
+  animation: dl-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dl-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}

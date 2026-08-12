@@ -1,5 +1,5 @@
 import { useEffect, useState, type DragEvent, type JSX } from 'react'
-import { Check, FolderPlus, LinkSimple, Plus, Star } from '@phosphor-icons/react'
+import { Check, DownloadSimple, FolderPlus, LinkSimple, Plus, Star } from '@phosphor-icons/react'
 import type { BrowserState, TabState } from '../types'
 import { TabItem } from './TabItem'
 import { PinnedBookmarks } from './PinnedBookmarks'
@@ -194,16 +194,40 @@ export function Sidebar({
   )
 }
 
-/** Bottom strip: one dot per workspace (click to switch, drop a tab to move it). */
+/** Bottom strip: downloads at the left, one dot per workspace, new-space. */
 function BottomBar({ state }: { state: BrowserState }): JSX.Element {
   const [dropSpace, setDropSpace] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState(false)
   useEffect(() => {
     const clear = (): void => setDropSpace(null)
     window.addEventListener('dragend', clear, true)
     return () => window.removeEventListener('dragend', clear, true)
   }, [])
+  // Subtle indicator while something is downloading.
+  useEffect(() => {
+    const refresh = (): void => {
+      chrome.downloads
+        .search({ state: 'in_progress' })
+        .then((items) => setDownloading(items.length > 0))
+        .catch(() => {})
+    }
+    refresh()
+    chrome.downloads.onCreated.addListener(refresh)
+    chrome.downloads.onChanged.addListener(refresh)
+    return () => {
+      chrome.downloads.onCreated.removeListener(refresh)
+      chrome.downloads.onChanged.removeListener(refresh)
+    }
+  }, [])
   return (
     <div className="bottom-bar">
+      <button
+        className={`bottom-add bottom-dl${downloading ? ' active' : ''}`}
+        title="Downloads"
+        onClick={() => chrome.tabs.create({ url: 'chrome://downloads' })}
+      >
+        <DownloadSimple size={16} />
+      </button>
       <div className="space-dots">
         {state.spaces.map((s) => (
           <button
