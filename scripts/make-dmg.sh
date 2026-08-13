@@ -42,5 +42,8 @@ hdiutil create -volname "Glint" -srcfolder "$STAGE" -ov -format UDBZ "$DMG"
 
 echo
 echo "Done: $DMG"
-echo "Unsigned build — recipients must right-click Glint.app -> Open (twice)"
-echo "the first time, or run: xattr -cr /Applications/Glint.app"
+echo "Unsigned build — first-open instructions for recipients"
+echo "(macOS 15+ removed the right-click->Open bypass):"
+echo "  A) Double-click Glint.app, click Done, then System Settings ->"
+echo "     Privacy & Security -> scroll down -> 'Open Anyway'"
+echo "  B) or in Terminal: xattr -cr /Applications/Glint.app"
