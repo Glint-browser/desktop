@@ -27,17 +27,18 @@ done
 #    runtime => no entitlement/library-validation concerns.
 codesign --force --deep --sign - "$APP" 2>&1 | tail -1 || true
 
-# 3) Wrap in a dmg with an Applications shortcut.
+# 3) Wrap in a dmg with an Applications shortcut. Staged dir = volume root.
+#    hdiutil create, not pkg-dmg: pkg-dmg's HFS-hybrid path pollutes files
+#    with com.apple.FinderInfo xattrs, which strict Gatekeeper validation
+#    rejects ("damaged") on quarantined downloads.
 VER=$(defaults read "$APP/Contents/Info" CFBundleShortVersionString)
 DMG="$HOME/Desktop/Glint-$VER-arm64.dmg"
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+rsync -a "$APP" "$STAGE/"
+ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
-"$SRC/chrome/installer/mac/pkg-dmg" \
-  --source /var/empty \
-  --target "$DMG" \
-  --format UDBZ \
-  --volname "Glint" \
-  --copy "$APP:/Glint.app" \
-  --symlink /Applications:/Applications
+hdiutil create -volname "Glint" -srcfolder "$STAGE" -ov -format UDBZ "$DMG"
 
 echo
 echo "Done: $DMG"
