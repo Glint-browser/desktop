@@ -1326,7 +1326,10 @@ body.platform-linux .topbar {
 }
 
 body {
-  background: var(--panel-bg);
+  /* Translucent over the fork's Liquid Glass (macOS 26); on non-glass
+     systems the native side-panel container paints the same solid gray
+     beneath, so this looks identical there. */
+  background: color-mix(in srgb, var(--panel-bg) 52%, transparent);
 }
 
 /* Electron sizing inside the panel: same paddings as the app sidebar. */
