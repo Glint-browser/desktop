@@ -3,7 +3,7 @@
  * version IS the Glint version (bumped by scripts/publish-release.sh); the
  * baked-in component ships with the browser, so it tracks the app.
  */
-export const UPDATE_REPO = 'Glint-browser/glint'
+export const UPDATE_REPO = 'Glint-browser/desktop'
 
 export interface UpdateInfo {
   version: string

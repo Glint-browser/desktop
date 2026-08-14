@@ -6,13 +6,13 @@
 #
 # First-time setup:
 #   brew install gh && gh auth login
-#   gh repo create Glint-browser/glint --public
+#   (repoet er Glint-browser/desktop — allerede offentlig)
 #
 # If NATIVE (C++) code changed since the last release build, run first:
 #   autoninja -C ~/chromium/src/out/glint-release chrome
 set -euo pipefail
 V=${1:?usage: publish-release.sh <version>}
-REPO="Glint-browser/glint"
+REPO="Glint-browser/desktop"
 command -v gh >/dev/null || { echo "Needs GitHub CLI: brew install gh && gh auth login"; exit 1; }
 cd "$(dirname "$0")/.."
 
