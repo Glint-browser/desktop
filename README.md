@@ -1,96 +1,83 @@
+<div align="center">
+  <img src="icon-original.png" width="120" alt="Glint logo">
+
 # Glint Browser
 
-A fast, workspace-based web browser built on **Electron + Chromium**, cross-platform (macOS / Windows / Linux).
+**A fast, workspace-first browser built on Chromium — with full native support for every Chrome extension.**
 
-The browser "chrome" (sidebar, spaces, tabs, address bar) is a React UI. Each
-tab is a real Chromium `WebContentsView` managed by the main process and layered
-over the page-content area reported by the UI.
+[![Latest release](https://img.shields.io/github/v/release/Glint-browser/desktop?label=download&color=6d5bd0)](https://github.com/Glint-browser/desktop/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-black)](https://github.com/Glint-browser/desktop/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-## Architecture
+</div>
+
+---
+
+## ✨ Features
+
+- **Liquid Glass UI** — on macOS 26 (Tahoe) the entire chrome (sidebar, top strip) is translucent glass, Zen-style
+- **Workspaces** — Arc-style spaces with colored dots, slide animations, horizontal-scroll switching and ⌥⌘←/→ shortcuts; exact restore across restarts
+- **Command palette** — ⌘T opens a Spotlight-style palette with history search and favicons
+- **Every Chrome extension works** — Glint *is* Chromium; install anything from the Chrome Web Store, no compatibility layer
+- **Profiles in tabs** — `/profile <name> <url>` in the palette opens an isolated session as a tab in your current workspace (multiple accounts on the same site, side by side)
+- **Built-in adblock** — uBlock Origin Lite ships inside the browser, invisible, toggleable in Settings, with an extra list for Scandinavian consent walls
+- **Pinned favorites** that actually survive restarts
+- **Auto-update check** — Glint tells you when a new version is out (Settings → Browser → Updates)
+
+## 📦 Download
+
+**[Get the latest .dmg →](https://github.com/Glint-browser/desktop/releases/latest)**
+
+> **First launch:** the app is not yet notarized, so macOS will block the first open.
+> Go to **System Settings → Privacy & Security**, scroll down, and click **"Open Anyway"** —
+> or run `xattr -cr /Applications/Glint.app` in Terminal. This is only needed once.
+
+Requires macOS on Apple Silicon (M1 or newer). The glass look requires macOS 26; older versions get the classic opaque theme.
+
+## 🏗 Architecture
+
+Glint is a **Chromium fork** with its UI built as a web app living in Chromium's side panel
+(the Vivaldi approach) — the native tab strip is gone, and one React app drives tabs,
+workspaces, pins and bookmarks through the `chrome.*` extension APIs.
 
 ```
-src/
-  main/            Electron main process (Node)
-    index.ts       App entry: window, IPC wiring
-    TabManager.ts  Owns tabs as WebContentsViews; navigation, layout, state
-  preload/         contextBridge API exposed to the UI as window.browser
-  renderer/        React UI (the Glint sidebar)
-    src/
-      App.tsx                 Layout + reports content-area bounds to main
-      components/Sidebar.tsx  Address bar, nav buttons, tab list, spaces
-      components/TabItem.tsx  A single tab row
-  shared/types.ts  Shared TabState/BrowserState + IPC channel names
+chromium-ui/       The Glint UI (Vite + React side-panel extension)
+  src/adapter.ts     window.browser implemented on chrome.* APIs
+  src/workspaces.ts  Arc-style workspace registry (exact group re-linking)
+  src/background.ts  Service worker: tab adoption, updates, pins
+patches/chromium/  The native half: every fork commit as an applyable patch
+scripts/           make-dmg.sh · publish-release.sh · export-patches.sh
+src/               Legacy Electron prototype (superseded by the fork)
 ```
 
-The UI never touches web content directly. It sends intents (create/close/
-navigate/activate) over IPC; the main process drives Chromium and pushes back a
-`BrowserState` snapshot the UI renders.
+Native additions (in `patches/chromium/`) include the ⌘T palette, the Glint settings
+window, isolated tab profiles, the bundled adblocker, Liquid Glass enablement and the
+chromeless single-sidebar window.
 
-## Run
+## 🔨 Building from source
+
+The fork is too large to host — rebuild it from a clean Chromium checkout:
 
 ```bash
-npm install
-npm run dev      # dev with hot reload
-npm run start    # preview the production build
-npm run build    # build only
+# 1. Fetch Chromium (https://www.chromium.org/developers/how-tos/get-the-code/)
+fetch chromium && cd src
+
+# 2. Pin the base revision and apply the Glint patches
+git checkout $(head -1 /path/to/desktop/patches/chromium/BASE_COMMIT.txt)
+gclient sync
+git am /path/to/desktop/patches/chromium/*.patch
+
+# 3. Build the UI and bake it in
+cd /path/to/desktop/chromium-ui
+npm install && npm run build && ./sync-component.sh
+
+# 4. Dev build
+gn gen out/glint && autoninja -C out/glint chrome
 ```
 
-> **Note (this dev machine only):** the shell has `ELECTRON_RUN_AS_NODE=1` set,
-> which makes the Electron binary boot as plain Node (you'll see
-> `TypeError: Cannot read properties of undefined (reading 'whenReady')`).
-> Launch with it unset:
-> ```bash
-> env -u ELECTRON_RUN_AS_NODE npm run dev
-> ```
+See [`patches/chromium/README.md`](patches/chromium/README.md) for details, and
+`scripts/make-dmg.sh` for the release packaging pipeline.
 
-## Package (installers)
+## 📄 License
 
-```bash
-npm run pack:mac     # .dmg / .zip
-npm run pack:win     # .exe (NSIS)
-npm run pack:linux   # AppImage / deb
-```
-
-Output lands in `release/` (git-ignored). macOS builds are unsigned — see the
-limitations below. The native `mouse-nav` addon and other native modules are
-rebuilt automatically for Electron's ABI during packaging.
-
-## Features
-
-- **Local new-tab page** (no Google auto-load) with a search box.
-- **Command palette** (`⌘T` / `⌘L`): filter open tabs, or type a URL / web
-  search. `↑/↓` to move, `Enter` to run, `Esc` to close.
-- **Spaces**: colored workspaces, each with its own set of tabs. Switch with the
-  pills in the sidebar or `⌘1`–`⌘9`; create with `⌘⇧N`.
-- **Split view** (`⌘D`): show the active tab and a neighbor side-by-side in the
-  active space. Split tabs get a blue accent in the sidebar; activating a tab
-  outside the split collapses it.
-- **Tab drag-to-reorder**: drag tabs within a space to reorder them.
-- **Find in page** (`⌘F`): incremental search with match count and prev/next
-  (`Enter` / `Shift+Enter`), shown in a bar above the page.
-- **Bookmarks / favorites**: star the active page (☆/★ in the toolbar); favorites
-  show as a grid in the sidebar. Click to open, right-click to remove. Stored in
-  `userData/bookmarks.json`.
-- **Browsing history**: every visit is recorded to `userData/history.json` and
-  surfaced in the command palette as you type.
-- **Session persistence**: spaces, tabs, and splits are saved to
-  `userData/session.json` and restored on launch.
-- Menu accelerators for new tab, close tab (`⌘W`), reload (`⌘R`), back/forward.
-
-> **Note on overlays:** the page is a native `WebContentsView` composited *above*
-> the React UI, so full-screen modals (the command palette) hide the page view
-> while open; the find bar instead shrinks the page from the top so it stays
-> visible. The sidebar is always visible because no view is positioned over it.
-
-## Roadmap / known limitations
-
-- **DRM & proprietary codecs** (Netflix, Spotify, some H.264/AAC): vanilla
-  Electron omits Widevine. Swap to the `castlabs/electron-releases` build +
-  VMP signing to enable it.
-- **Chrome extensions**: Electron supports only a subset of the extensions API.
-  Full Web Store support is a large, separate effort.
-- Not yet built: downloads, settings, dedicated history page, N-way (>2) split,
-  drag-tab-to-split gesture.
-- Distribution: installers build, but aren't code-signed/notarized yet — needs
-  an Apple Developer cert (mac) and a code-signing cert (Windows).
-```
+[MIT](LICENSE) — Chromium itself is BSD-licensed by the Chromium Authors.
