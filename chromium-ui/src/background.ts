@@ -117,7 +117,10 @@ chrome.tabGroups.onUpdated.addListener(async (group) => {
 })
 
 // Drop pin metadata for closed tabs so storage doesn't accumulate stale ids.
-chrome.tabs.onRemoved.addListener(async (tabId) => {
+// NOT when the window is closing (shutdown/restart): those entries are what
+// the adapter rebinds to the restored tabs by URL after relaunch.
+chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
+  if (removeInfo?.isWindowClosing) return
   try {
     const { pinMeta } = await chrome.storage.local.get('pinMeta')
     const meta = (pinMeta as Record<string, unknown>) ?? {}
@@ -137,5 +140,21 @@ chrome.runtime.onMessage.addListener((msg) => {
     void activateWorkspace(msg.id).catch(() => {})
   } else if (msg?.type === 'create-workspace') {
     void createWorkspace(typeof msg.name === 'string' ? msg.name : undefined).catch(() => {})
+  }
+})
+
+// Keep pinned tabs' stored URLs current so post-restart rebinding matches.
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+  if (!changeInfo.url) return
+  try {
+    const { pinMeta } = await chrome.storage.local.get('pinMeta')
+    const meta = (pinMeta as Record<string, { url?: string }>) ?? {}
+    const entry = meta[String(tabId)]
+    if (entry && entry.url !== changeInfo.url) {
+      entry.url = changeInfo.url
+      await chrome.storage.local.set({ pinMeta: meta })
+    }
+  } catch {
+    // storage race — next update pass gets it
   }
 })

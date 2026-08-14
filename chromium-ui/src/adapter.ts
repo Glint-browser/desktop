@@ -61,6 +61,8 @@ const SETTINGS_DEFAULTS: AppSettings = {
 interface PinMeta {
   favorite: boolean
   folderId: string | null
+  /** Last known URL — used to rebind pins to new tab ids after a restart. */
+  url?: string
 }
 
 /** Chromium serves favicons to extensions holding the "favicon" permission. */
@@ -89,6 +91,8 @@ function toNavigableUrl(input: string, engine: AppSettings['searchEngine']): str
 // ---------------------------------------------------------------------------
 // Storage helpers
 // ---------------------------------------------------------------------------
+
+const panelStart = Date.now()
 
 async function getPinMeta(): Promise<Record<string, PinMeta>> {
   const { pinMeta } = await chrome.storage.local.get('pinMeta')
@@ -162,6 +166,37 @@ async function buildState(): Promise<BrowserState> {
     color: w.color
   }))
   const groupToWs = workspaceByGroup(registry.workspaces)
+  // Pins are keyed by tab id, which changes across restarts: shortly after
+  // panel start, rebind stale entries to restored tabs by URL; later, prune
+  // them (a pinned tab that is simply closed stays unpinned).
+  {
+    const liveIds = new Set(tabs.map((t) => String(t.id)))
+    const staleIds = Object.keys(pinMeta).filter((id) => !liveIds.has(id))
+    if (staleIds.length > 0) {
+      const rebinding = Date.now() - panelStart < 120_000
+      const claimed = new Set(Object.keys(pinMeta).filter((id) => liveIds.has(id)))
+      let changed = false
+      for (const oldId of staleIds) {
+        const pm = pinMeta[oldId]
+        const match = rebinding && pm.url
+          ? tabs.find(
+              (t) => !claimed.has(String(t.id)) && (t.url ?? t.pendingUrl) === pm.url
+            )
+          : undefined
+        if (match) {
+          delete pinMeta[oldId]
+          pinMeta[String(match.id)] = pm
+          claimed.add(String(match.id))
+          changed = true
+        } else if (!rebinding) {
+          delete pinMeta[oldId]
+          changed = true
+        }
+      }
+      if (changed) await setPinMeta(pinMeta)
+    }
+  }
+
   const activeSpaceId = registry.activeId ?? spaces[0]?.id ?? null
 
   const activeTab = tabs.find((t) => t.active) ?? null
@@ -445,7 +480,8 @@ const api = {
 
   pinTab: async (id: string, folderId: string | null = null, favorite = false): Promise<void> => {
     const meta = await getPinMeta()
-    meta[id] = { favorite, folderId }
+    const tab = await chrome.tabs.get(Number(id)).catch(() => null)
+    meta[id] = { favorite, folderId, url: tab?.url ?? tab?.pendingUrl }
     await setPinMeta(meta)
   },
 
