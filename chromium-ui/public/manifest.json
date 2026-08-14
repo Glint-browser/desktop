@@ -12,7 +12,8 @@
     "sidePanel",
     "favicon",
     "management",
-    "downloads"
+    "downloads",
+    "alarms"
   ],
   "background": {
     "service_worker": "background.js",

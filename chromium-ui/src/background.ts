@@ -13,17 +13,82 @@ import {
   activateWorkspace,
   createWorkspace,
   groupColorFor,
+  groupTitleFor,
   isMaterializing,
   loadWorkspaces,
   reconcileWorkspaces,
+  stripMarker,
   workspaceByGroup
 } from './workspaces'
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {})
 
 
-chrome.runtime.onInstalled.addListener(() => void reconcileWorkspaces().catch(() => {}))
-chrome.runtime.onStartup.addListener(() => void reconcileWorkspaces().catch(() => {}))
+// Session restore recreates tabs BEFORE re-attaching them to their groups —
+// tabs.onCreated fires while groupId is still -1. Adopting them then rips
+// restored tabs into the wrong groups and scrambles every workspace. Real
+// browser launches (onStartup/onInstalled) open a grace window during which
+// adoption stands down; an alarm afterwards sweeps up genuinely-new strays.
+// storage.session survives service-worker restarts but not browser restarts,
+// so a mid-session SW wake-up does NOT re-open the window.
+const STARTUP_GRACE_MS = 15_000
+
+async function beginStartupGrace(): Promise<void> {
+  await chrome.storage.session
+    .set({ startupGraceUntil: Date.now() + STARTUP_GRACE_MS })
+    .catch(() => {})
+  chrome.alarms.create('glint-adopt-sweep', { when: Date.now() + STARTUP_GRACE_MS + 1000 })
+  void reconcileWorkspaces().catch(() => {})
+}
+
+async function inStartupGrace(): Promise<boolean> {
+  try {
+    const { startupGraceUntil } = await chrome.storage.session.get('startupGraceUntil')
+    return typeof startupGraceUntil === 'number' && Date.now() < startupGraceUntil
+  } catch {
+    return false
+  }
+}
+
+async function adoptStrayTabs(): Promise<void> {
+  try {
+    const state = await reconcileWorkspaces()
+    const active = state.workspaces.find((w) => w.id === state.activeId)
+    if (!active) return
+    const wins = await chrome.windows.getAll({ windowTypes: ['normal'] })
+    for (const win of wins) {
+      const tabs = await chrome.tabs.query({ windowId: win.id })
+      const stray = tabs.filter(
+        (t) => t.id !== undefined && !t.pinned && (t.groupId === undefined || t.groupId === -1)
+      )
+      if (stray.length === 0) continue
+      const ids = stray.map((t) => t.id!) 
+      if (active.groupId !== null) {
+        const groups = await chrome.tabGroups.query({ windowId: win.id })
+        if (groups.some((g) => g.id === active.groupId)) {
+          await chrome.tabs.group({ tabIds: ids, groupId: active.groupId })
+          continue
+        }
+      }
+      const groupId = await chrome.tabs.group({ tabIds: ids })
+      await chrome.tabGroups.update(groupId, {
+        title: groupTitleFor(active),
+        color: groupColorFor(active.color)
+      })
+      active.groupId = groupId
+      await chrome.storage.local.set({ workspaces: state.workspaces })
+    }
+  } catch {
+    // window mid-teardown — next reconcile heals
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'glint-adopt-sweep') void adoptStrayTabs()
+})
+
+chrome.runtime.onInstalled.addListener(() => void beginStartupGrace())
+chrome.runtime.onStartup.addListener(() => void beginStartupGrace())
 
 // The active workspace follows whatever tab the user lands on — EXCEPT when
 // the current workspace just lost its last tab: Chromium then auto-focuses a
@@ -63,6 +128,7 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     if (isMaterializing()) return
     if (tab.id === undefined || tab.pinned) return
     if (tab.groupId !== undefined && tab.groupId !== -1) return
+    if (await inStartupGrace()) return // session restore owns these tabs
     const win = await chrome.windows.get(tab.windowId)
     if (win.type !== 'normal') return
 
@@ -80,7 +146,7 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     // Empty active workspace: this tab materializes its group.
     const groupId = await chrome.tabs.group({ tabIds: [tab.id] })
     await chrome.tabGroups.update(groupId, {
-      title: active.name,
+      title: groupTitleFor(active),
       color: groupColorFor(active.color)
     })
     active.groupId = groupId
@@ -108,8 +174,9 @@ chrome.tabGroups.onUpdated.addListener(async (group) => {
   try {
     const { workspaces } = await loadWorkspaces()
     const ws = workspaces.find((w) => w.groupId === group.id)
-    if (!ws || !group.title || ws.name === group.title) return
-    ws.name = group.title
+    const title = stripMarker(group.title ?? '')
+    if (!ws || !title || ws.name === title) return
+    ws.name = title
     await chrome.storage.local.set({ workspaces })
   } catch {
     // storage race

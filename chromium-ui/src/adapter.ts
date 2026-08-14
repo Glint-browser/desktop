@@ -12,11 +12,14 @@
  *   context menus / palette triggers        → CustomEvents handled by App.tsx
  */
 import {
-  reconcileWorkspaces,
+  activateWorkspace,
+  createWorkspace,
   cycleWorkspaceColor,
   deleteWorkspace,
   groupColorFor,
+  groupTitleFor,
   loadWorkspaces,
+  reconcileWorkspaces,
   renameWorkspace,
   workspaceByGroup
 } from './workspaces'
@@ -406,13 +409,22 @@ const api = {
 
   createSpace: async (name?: string): Promise<string> => {
     // Grouping happens in the background worker (single writer — its
-    // adoption listener must see the materializing flag in-process).
-    await chrome.runtime.sendMessage({ type: 'create-workspace', name }).catch(() => {})
+    // adoption listener must see the materializing flag in-process). If the
+    // worker is unreachable, do it here rather than dropping the click.
+    try {
+      await chrome.runtime.sendMessage({ type: 'create-workspace', name })
+    } catch {
+      await createWorkspace(name)
+    }
     return ''
   },
 
   activateSpace: async (id: string): Promise<void> => {
-    await chrome.runtime.sendMessage({ type: 'activate-workspace', id }).catch(() => {})
+    try {
+      await chrome.runtime.sendMessage({ type: 'activate-workspace', id })
+    } catch {
+      await activateWorkspace(id)
+    }
   },
 
   renameSpace: async (id: string, name: string): Promise<void> => renameWorkspace(id, name),
@@ -502,7 +514,7 @@ const api = {
     // Moving a tab into an empty workspace materializes its group.
     const groupId = await chrome.tabs.group({ tabIds: [Number(id)] })
     await chrome.tabGroups.update(groupId, {
-      title: ws.name,
+      title: groupTitleFor(ws),
       color: groupColorFor(ws.color)
     })
     ws.groupId = groupId

@@ -46,6 +46,52 @@ export function groupColorFor(hex: string): chrome.tabGroups.ColorEnum {
   return HEX_TO_GROUP_COLOR[hex] ?? 'purple'
 }
 
+// ---------------------------------------------------------------------------
+// Invisible workspace-id marker in group titles. Session restore preserves
+// titles, so re-linking workspaces to their restored groups is EXACT instead
+// of guessed from names (breaks with duplicate names) or slot order.
+// ---------------------------------------------------------------------------
+const MARK = '\u2063' // invisible separator: "Glint marker follows"
+const ZW0 = '\u200b'
+const ZW1 = '\u200c'
+
+function idPrefix(wsId: string): string {
+  return wsId.replace(/-/g, '').slice(0, 8)
+}
+
+function markerFor(wsId: string): string {
+  const bits = [...idPrefix(wsId)].flatMap((h) =>
+    parseInt(h, 16).toString(2).padStart(4, '0').split('')
+  )
+  return MARK + bits.map((b) => (b === '1' ? ZW1 : ZW0)).join('')
+}
+
+/** The full group title for a workspace: visible name + invisible id. */
+export function groupTitleFor(ws: { id: string; name: string }): string {
+  return ws.name + markerFor(ws.id)
+}
+
+/** Extracts the 8-hex workspace id prefix from a marked title, or null. */
+function parseMarkedId(title: string): string | null {
+  const i = title.indexOf(MARK)
+  if (i === -1) return null
+  const bits = [...title.slice(i + 1)]
+    .map((c) => (c === ZW1 ? '1' : c === ZW0 ? '0' : ''))
+    .join('')
+  if (bits.length < 32) return null
+  let hex = ''
+  for (let k = 0; k < 32; k += 4) {
+    hex += parseInt(bits.slice(k, k + 4), 2).toString(16)
+  }
+  return hex
+}
+
+/** Group title without the invisible marker (for display / name sync). */
+export function stripMarker(title: string): string {
+  const i = title.indexOf(MARK)
+  return i === -1 ? title : title.slice(0, i)
+}
+
 export interface WorkspaceState {
   workspaces: Workspace[]
   activeId: string
@@ -106,8 +152,28 @@ export async function reconcileWorkspaces(windowId?: number): Promise<WorkspaceS
   const liveIds = new Set(groups.map((g) => g.id))
   const claimed = new Set<number>()
 
-  // Pass 1: keep live group links. Pass 2: re-link by title (session restore
-  // hands groups new ids but keeps titles).
+  // Cleanup: two registry entries must never share a group, and identical
+  // empty duplicates (damage from historical double-writer sessions) collapse.
+  {
+    const seenGroups = new Set<number>()
+    for (const w of workspaces) {
+      if (w.groupId !== null) {
+        if (seenGroups.has(w.groupId)) w.groupId = null
+        else seenGroups.add(w.groupId)
+      }
+    }
+    const seenEmpty = new Set<string>()
+    for (let i = workspaces.length - 1; i >= 0; i--) {
+      const w = workspaces[i]
+      if (w.groupId === null) {
+        const key = w.name + '|' + w.color
+        if (seenEmpty.has(key)) workspaces.splice(i, 1)
+        else seenEmpty.add(key)
+      }
+    }
+  }
+
+  // Pass 1: same-session links by group id.
   for (const ws of workspaces) {
     if (ws.groupId !== null && liveIds.has(ws.groupId) && !claimed.has(ws.groupId)) {
       claimed.add(ws.groupId)
@@ -115,33 +181,47 @@ export async function reconcileWorkspaces(windowId?: number): Promise<WorkspaceS
       ws.groupId = null
     }
   }
+  // Pass 2: EXACT re-link via the invisible id marker in group titles
+  // (restored groups have new ids but keep their titles).
   for (const ws of workspaces) {
     if (ws.groupId !== null) continue
+    const pref = idPrefix(ws.id)
     const match = groups.find(
-      (g) => !claimed.has(g.id) && g.title !== '' && g.title === ws.name
+      (g) => !claimed.has(g.id) && parseMarkedId(g.title ?? '') === pref
     )
     if (match) {
       ws.groupId = match.id
       claimed.add(match.id)
     }
   }
-
-  // Pass 3: unclaimed groups FILL empty workspaces (in order) — the registry
-  // is the source of truth, so the group takes the workspace's name/color.
-  // Pass 4: still-unclaimed groups become new workspaces.
+  // Pass 3 (legacy, unmarked groups only): match by visible title.
+  for (const ws of workspaces) {
+    if (ws.groupId !== null) continue
+    const match = groups.find(
+      (g) =>
+        !claimed.has(g.id) &&
+        parseMarkedId(g.title ?? '') === null &&
+        g.title !== '' &&
+        g.title === ws.name
+    )
+    if (match) {
+      ws.groupId = match.id
+      claimed.add(match.id)
+    }
+  }
+  // Pass 4 (legacy, unmarked only): remaining groups fill empty workspaces in
+  // order. Pass 5: anything still unclaimed becomes a new workspace.
   for (const g of groups) {
     if (claimed.has(g.id)) continue
-    const empty = workspaces.find((w) => w.groupId === null)
+    const marked = parseMarkedId(g.title ?? '') !== null
+    const empty = marked ? undefined : workspaces.find((w) => w.groupId === null)
     if (empty) {
       empty.groupId = g.id
       claimed.add(g.id)
-      void chrome.tabGroups
-        .update(g.id, { title: empty.name, color: groupColorFor(empty.color) })
-        .catch(() => {})
     } else {
       workspaces.push({
         id: crypto.randomUUID(),
-        name: g.title || `Space ${workspaces.length + 1}`,
+        name: stripMarker(g.title ?? '') || `Space ${workspaces.length + 1}`,
         color: GROUP_COLOR_TO_HEX[g.color] ?? WS_PALETTE[0],
         groupId: g.id
       })
@@ -156,6 +236,18 @@ export async function reconcileWorkspaces(windowId?: number): Promise<WorkspaceS
       color: WS_PALETTE[0],
       groupId: null
     })
+  }
+
+  // Every linked group carries "name + invisible id marker" as its title —
+  // this also transitions pre-marker sessions in place.
+  for (const ws of workspaces) {
+    if (ws.groupId === null) continue
+    const g = groups.find((x) => x.id === ws.groupId)
+    if (!g) continue
+    const wanted = groupTitleFor(ws)
+    if ((g.title ?? '') !== wanted) {
+      void chrome.tabGroups.update(ws.groupId, { title: wanted }).catch(() => {})
+    }
   }
 
   // Distinct colors: adopted groups often share one color — give duplicates
@@ -272,7 +364,9 @@ export async function renameWorkspace(id: string, name: string): Promise<void> {
   ws.name = name
   await saveWorkspaces(state.workspaces, state.activeId)
   if (ws.groupId !== null) {
-    await chrome.tabGroups.update(ws.groupId, { title: name }).catch(() => {})
+    await chrome.tabGroups
+      .update(ws.groupId, { title: groupTitleFor(ws) })
+      .catch(() => {})
   }
 }
 
