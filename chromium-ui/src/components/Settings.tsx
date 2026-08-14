@@ -10,7 +10,7 @@ import {
   ShieldCheck,
   Trash
 } from '@phosphor-icons/react'
-import type { AppSettings, ExtensionInfo, SearchEngine, ThemeSource } from '../types'
+import type { AppSettings, ExtensionInfo, SearchEngine, ThemeSource , UpdateStatus } from '../types'
 
 // Vivaldi-style settings: a full-window page with a searchable category rail,
 // ALL-CAPS section headers with rules, and grouped controls — rendered in the
@@ -320,10 +320,45 @@ function GeneralPane(): JSX.Element {
             </button>
           </VGroup>
           <VGroup label="Updates">
-            <div className="row-desc">Updates ship with the Glint browser build.</div>
+            <UpdatesRow />
           </VGroup>
         </VGrid>
       </VSection>
+    </>
+  )
+}
+
+function UpdatesRow(): JSX.Element {
+  const [version, setVersion] = useState('')
+  const [status, setStatus] = useState<UpdateStatus | null>(null)
+
+  useEffect(() => {
+    void window.browser.getAppVersion().then(setVersion)
+    return window.browser.onUpdateStatus(setStatus)
+  }, [])
+
+  const check = async (): Promise<void> => {
+    setStatus({ state: 'checking' })
+    setStatus(await window.browser.checkForUpdates())
+  }
+
+  return (
+    <>
+      <div className="row-desc">
+        Glint {version}
+        {status?.state === 'available' && ` — version ${status.version} is available`}
+        {status?.state === 'not-available' && ' — up to date'}
+        {status?.state === 'checking' && ' — checking…'}
+      </div>
+      {status?.state === 'available' ? (
+        <button className="settings-btn" onClick={() => void window.browser.installUpdate()}>
+          Download Glint {status.version}
+        </button>
+      ) : (
+        <button className="settings-btn" onClick={() => void check()}>
+          Check for updates
+        </button>
+      )}
     </>
   )
 }

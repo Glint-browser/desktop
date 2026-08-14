@@ -23,6 +23,7 @@ import {
   renameWorkspace,
   workspaceByGroup
 } from './workspaces'
+import { runUpdateCheck, UPDATE_REPO } from './update'
 import type {
   AppSettings,
   Bookmark,
@@ -624,10 +625,31 @@ const api = {
 
   getAppVersion: async (): Promise<string> => chrome.runtime.getManifest().version,
 
-  // Updates ship with the browser itself in the Chromium build.
-  checkForUpdates: async (): Promise<UpdateStatus> => ({ state: 'unsupported' }),
-  installUpdate: async (): Promise<void> => {},
-  onUpdateStatus: (_cb: (status: UpdateStatus) => void): (() => void) => () => {}
+  checkForUpdates: async (): Promise<UpdateStatus> => {
+    const info = await runUpdateCheck()
+    return info
+      ? { state: 'available', version: info.version }
+      : { state: 'not-available' }
+  },
+
+  installUpdate: async (): Promise<void> => {
+    const { updateInfo } = await chrome.storage.local.get('updateInfo')
+    const url =
+      (updateInfo as { url?: string } | null)?.url ??
+      `https://github.com/${UPDATE_REPO}/releases/latest`
+    await chrome.tabs.create({ url })
+  },
+
+  onUpdateStatus: (cb: (status: UpdateStatus) => void): (() => void) => {
+    const listener = (changes: Record<string, chrome.storage.StorageChange>): void => {
+      if ('updateInfo' in changes) {
+        const v = changes.updateInfo.newValue as { version: string } | null
+        cb(v ? { state: 'available', version: v.version } : { state: 'not-available' })
+      }
+    }
+    chrome.storage.local.onChanged.addListener(listener)
+    return () => chrome.storage.local.onChanged.removeListener(listener)
+  }
 }
 
 export type BrowserApi = typeof api

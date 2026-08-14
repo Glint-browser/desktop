@@ -20,6 +20,7 @@ import {
   stripMarker,
   workspaceByGroup
 } from './workspaces'
+import { runUpdateCheck } from './update'
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {})
 
@@ -85,7 +86,11 @@ async function adoptStrayTabs(): Promise<void> {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'glint-adopt-sweep') void adoptStrayTabs()
+  else if (alarm.name === 'glint-update-check') void runUpdateCheck()
 })
+
+// New-version check: shortly after launch, then every six hours.
+chrome.alarms.create('glint-update-check', { periodInMinutes: 360, delayInMinutes: 1 })
 
 chrome.runtime.onInstalled.addListener(() => void beginStartupGrace())
 chrome.runtime.onStartup.addListener(() => void beginStartupGrace())

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Glint UI",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "Glint sidebar \u2014 spaces, tabs, favorites, bookmarks. The Glint browser UI running natively on Chromium.",
   "permissions": [
     "tabs",
