@@ -1,0 +1,126 @@
+From e2d935274f834109d894982231cd6ea820ddd836 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Sun, 5 Jul 2026 23:24:47 +0200
+Subject: [PATCH 09/60] Glint: sidebar address bar shows + syncs the active
+ tab's URL
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 37 +++++++++++++++++++
+ .../frame/vertical_tab_strip_region_view.h    | 15 +++++++-
+ 2 files changed, 51 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index cd5dd71b82..6d04f8dea5 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -77,6 +77,9 @@
+ #include "ui/base/window_open_disposition.h"
+ #include "ui/events/keycodes/keyboard_codes.h"
+ #include "url/gurl.h"
++#include "chrome/browser/ui/tabs/tab_change_type.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "content/public/browser/web_contents.h"
+ #include "ui/gfx/geometry/point.h"
+ #include "ui/views/background.h"
+ #include "ui/views/controls/button/label_button.h"
+@@ -147,6 +150,7 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   // Glint: address bar at the very top of the sidebar (Arc/Glint style). Added
+   // first so it sits above the tab controls in the vertical layout.
+   glint_browser_ = browser_view->browser();
++  glint_browser_->tab_strip_model()->AddObserver(this);
+   auto glint_address_bar = std::make_unique<views::Textfield>();
+   glint_address_bar->SetPlaceholderText(u"Search or enter address");
+   glint_address_bar->set_controller(this);
+@@ -156,6 +160,7 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+       gfx::Insets::TLBR(34, region_horizontal_padding, region_horizontal_padding,
+                         region_horizontal_padding));
+   glint_address_bar_ = AddChildView(std::move(glint_address_bar));
++  UpdateGlintAddressBar();
+ 
+   top_button_container_ =
+       AddChildView(std::make_unique<VerticalTabStripTopContainer>(
+@@ -229,6 +234,9 @@ VerticalTabStripRegionView::~VerticalTabStripRegionView() {
+ 
+   // Prevent dangling pointer.
+   state_controller_->SetDelegate(nullptr);
++  if (glint_browser_) {
++    glint_browser_->tab_strip_model()->RemoveObserver(this);
++  }
+ }
+ 
+ bool VerticalTabStripRegionView::IsAnimatingSize() const {
+@@ -1198,5 +1206,34 @@ bool VerticalTabStripRegionView::HandleKeyEvent(
+   return true;
+ }
+ 
++void VerticalTabStripRegionView::OnTabStripModelChanged(
++    TabStripModel* tab_strip_model,
++    const TabStripModelChange& change,
++    const TabStripSelectionChange& selection) {
++  if (selection.active_tab_changed()) {
++    UpdateGlintAddressBar();
++  }
++}
++
++void VerticalTabStripRegionView::OnTabChangedAt(tabs::TabInterface* tab,
++                                                int index,
++                                                TabChangeType change_type) {
++  UpdateGlintAddressBar();
++}
++
++void VerticalTabStripRegionView::UpdateGlintAddressBar() {
++  if (!glint_address_bar_ || glint_address_bar_->HasFocus() || !glint_browser_) {
++    return;
++  }
++  content::WebContents* wc =
++      glint_browser_->tab_strip_model()->GetActiveWebContents();
++  const GURL url = wc ? wc->GetVisibleURL() : GURL();
++  if (!url.is_valid() || url.IsAboutBlank() || url.SchemeIs("chrome")) {
++    glint_address_bar_->SetText(std::u16string());
++  } else {
++    glint_address_bar_->SetText(base::UTF8ToUTF16(url.spec()));
++  }
++}
++
+ BEGIN_METADATA(VerticalTabStripRegionView)
+ END_METADATA
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index 1e2467efe6..86243a11d4 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -17,6 +17,7 @@
+ #include "chrome/browser/ui/omnibox/omnibox_tab_helper.h"
+ #include "chrome/browser/ui/tabs/tab_data.h"
+ #include "chrome/browser/ui/tabs/vertical_tab_strip_state.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+ #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
+ #include "chrome/browser/ui/views/frame/base_tab_strip_region_view.h"
+ #include "chrome/browser/ui/views/tabs/common/tab_strip_view.h"
+@@ -59,7 +60,8 @@ class VerticalTabStripRegionView final
+       public OmniboxTabHelper::Observer,
+       public tabs::VerticalTabStripStateController::Delegate,
+       public views::WidgetObserver,
+-      public views::TextfieldController {
++      public views::TextfieldController,
++      public TabStripModelObserver {
+   METADATA_HEADER(VerticalTabStripRegionView, BaseTabStripRegionView)
+ 
+  public:
+@@ -252,6 +254,17 @@ class VerticalTabStripRegionView final
+   // views::TextfieldController: navigate when the sidebar address bar submits.
+   bool HandleKeyEvent(views::Textfield* sender,
+                       const ui::KeyEvent& key_event) override;
++
++  // TabStripModelObserver: keep the sidebar address bar showing the active URL.
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override;
++  void OnTabChangedAt(tabs::TabInterface* tab,
++                      int index,
++                      TabChangeType change_type) override;
++  // Sync the sidebar address bar text with the active tab's URL.
++  void UpdateGlintAddressBar();
+   raw_ptr<views::Separator> top_button_separator_ = nullptr;
+   raw_ptr<VerticalTabStripBottomContainer> bottom_button_container_ = nullptr;
+   raw_ptr<views::View> gemini_button_ = nullptr;

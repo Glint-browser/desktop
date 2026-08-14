@@ -1,0 +1,236 @@
+From 6524ac92e0eaa1b6cdc889dd11d5ff61976128cf Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Mon, 6 Jul 2026 21:24:03 +0200
+Subject: [PATCH 17/60] Glint: Electron-parity sidebar - nav buttons, reordered
+ header, New Tab row, no bottom pill
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 135 +++++++++++++++---
+ .../frame/vertical_tab_strip_region_view.h    |   2 +
+ 2 files changed, 119 insertions(+), 18 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 985233cd5c..1419c849e8 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -68,7 +68,9 @@
+ #include "ui/compositor/layer.h"
+ #include "ui/display/screen.h"
+ #include "ui/events/event.h"
++#include "chrome/app/vector_icons/vector_icons.h"
+ #include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
++#include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_tabstrip.h"
+ #include "chrome/browser/ui/tabs/tab_group_model.h"
+ #include "components/tab_groups/tab_group_color.h"
+@@ -190,6 +192,47 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   glint_browser_ = browser_view->browser();
+   glint_browser_->tab_strip_model()->AddObserver(this);
+ 
++  // Glint: back / forward / reload buttons at the very top of the sidebar,
++  // to the right of the macOS traffic lights (Arc style).
++  using GlintNavCommand = void (*)(BrowserWindowInterface*,
++                                   WindowOpenDisposition);
++  auto make_nav_button = [this](GlintNavCommand command,
++                                const gfx::VectorIcon& icon,
++                                std::u16string_view tooltip) {
++    auto button = std::make_unique<views::ImageButton>(base::BindRepeating(
++        command,
++        base::Unretained(
++            static_cast<BrowserWindowInterface*>(glint_browser_.get())),
++        WindowOpenDisposition::CURRENT_TAB));
++    button->SetImageModel(
++        views::Button::STATE_NORMAL,
++        ui::ImageModel::FromVectorIcon(icon, ui::kColorIcon, 18));
++    button->SetTooltipText(std::u16string(tooltip));
++    button->SetInstallFocusRingOnFocus(false);
++    views::InkDrop::Get(button.get())
++        ->SetMode(views::InkDropHost::InkDropMode::ON);
++    views::InkDrop::Get(button.get())
++        ->GetInkDrop()
++        ->SetShowHighlightOnHover(true);
++    views::InstallRoundRectHighlightPathGenerator(button.get(), gfx::Insets(),
++                                                  6);
++    return button;
++  };
++  auto nav_row = std::make_unique<views::View>();
++  auto* nav_box = nav_row->SetLayoutManager(std::make_unique<views::BoxLayout>(
++      views::BoxLayout::Orientation::kHorizontal));
++  nav_box->set_between_child_spacing(10);
++  // Left margin clears the traffic lights.
++  nav_row->SetProperty(views::kMarginsKey,
++                       gfx::Insets::TLBR(8, 78, 2, region_horizontal_padding));
++  nav_row->AddChildView(
++      make_nav_button(&chrome::GoBack, kArrowBackIcon, u"Back"));
++  nav_row->AddChildView(
++      make_nav_button(&chrome::GoForward, kArrowForwardIcon, u"Forward"));
++  nav_row->AddChildView(
++      make_nav_button(&chrome::Reload, vector_icons::kRefreshIcon, u"Reload"));
++  AddChildView(std::move(nav_row));
++
+   // Address bar row: the text field plus a trailing "copy link" button.
+   // BoxLayout keeps the row at the text field's natural height (the field
+   // flexes to fill width; the button stays fixed).
+@@ -200,10 +243,9 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   address_box->set_cross_axis_alignment(
+       views::BoxLayout::CrossAxisAlignment::kCenter);
+   address_box->set_between_child_spacing(4);
+-  // Top margin clears the macOS traffic-light window controls.
+   address_row->SetProperty(
+       views::kMarginsKey,
+-      gfx::Insets::TLBR(34, region_horizontal_padding, region_horizontal_padding,
++      gfx::Insets::TLBR(6, region_horizontal_padding, region_horizontal_padding,
+                         region_horizontal_padding));
+ 
+   auto glint_address_bar = std::make_unique<views::Textfield>();
+@@ -252,8 +294,20 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+           .provider_types = AutocompleteClassifier::DefaultOmniboxProviders()});
+   glint_autocomplete_->AddObserver(this);
+ 
+-  // Glint: workspace header row — folder icon + bold name (like the "Work"
+-  // space in the reference).
++  // Glint: subtle "drag to pin" hint directly under the address bar, like the
++  // reference (this is the pinned-tabs area).
++  auto pin_hint = std::make_unique<views::Label>(
++      u"Drag tabs here to pin", views::style::CONTEXT_LABEL,
++      views::style::STYLE_SECONDARY);
++  pin_hint->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++  pin_hint->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(0, region_horizontal_padding + 4, 8,
++                        region_horizontal_padding));
++  glint_pin_hint_ = AddChildView(std::move(pin_hint));
++
++  // Glint: workspace header row — bold space name with a "+" button pushed to
++  // the right edge (like the "Work" row in the reference).
+   auto workspace_row = std::make_unique<views::View>();
+   auto* workspace_row_layout =
+       workspace_row->SetLayoutManager(std::make_unique<views::FlexLayout>());
+@@ -264,17 +318,28 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+       gfx::Insets::TLBR(2, region_horizontal_padding + 4, 0,
+                         region_horizontal_padding));
+ 
+-  auto folder_icon =
+-      std::make_unique<views::ImageView>(ui::ImageModel::FromVectorIcon(
+-          vector_icons::kFolderFlippableIcon, ui::kColorIcon, 16));
+-  folder_icon->SetProperty(views::kMarginsKey, gfx::Insets::TLBR(0, 0, 0, 6));
+-  workspace_row->AddChildView(std::move(folder_icon));
+-
+   auto workspace_name = std::make_unique<views::Label>(
+       u"Personal", views::style::CONTEXT_LABEL, views::style::STYLE_EMPHASIZED);
+   workspace_name->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+   glint_workspace_name_ = workspace_row->AddChildView(std::move(workspace_name));
+ 
++  // Flexible spacer pushes the button to the row's right edge.
++  auto* header_spacer =
++      workspace_row->AddChildView(std::make_unique<views::View>());
++  header_spacer->SetProperty(
++      views::kFlexBehaviorKey,
++      views::FlexSpecification(views::MinimumFlexSizeRule::kScaleToZero,
++                               views::MaximumFlexSizeRule::kUnbounded));
++
++  auto new_folder_button = std::make_unique<views::ImageButton>(
++      base::BindRepeating(&VerticalTabStripRegionView::GlintNewTab,
++                          base::Unretained(this)));
++  new_folder_button->SetImageModel(
++      views::Button::STATE_NORMAL,
++      ui::ImageModel::FromVectorIcon(kAddIcon, ui::kColorIcon, 16));
++  new_folder_button->SetTooltipText(u"New tab");
++  workspace_row->AddChildView(std::move(new_folder_button));
++
+   AddChildView(std::move(workspace_row));
+ 
+   // Glint: bookmarks folder row (matches the reference sidebar). Opens the
+@@ -304,16 +369,31 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+                         region_horizontal_padding));
+   AddChildView(std::move(bookmarks_row));
+ 
+-  // Glint: subtle "drag to pin" hint under the workspace name.
+-  auto pin_hint = std::make_unique<views::Label>(
+-      u"Drag tabs here to pin", views::style::CONTEXT_LABEL,
+-      views::style::STYLE_SECONDARY);
+-  pin_hint->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+-  pin_hint->SetProperty(
++  // Glint: "+ New Tab" row above the tab list (Arc style). Replaces the stock
++  // bottom "+" pill.
++  auto new_tab_row = std::make_unique<views::LabelButton>(
++      base::BindRepeating(&VerticalTabStripRegionView::GlintNewTab,
++                          base::Unretained(this)),
++      u"New Tab");
++  new_tab_row->SetImageModel(
++      views::Button::STATE_NORMAL,
++      ui::ImageModel::FromVectorIcon(kAddIcon, ui::kColorIcon, 16));
++  new_tab_row->SetImageLabelSpacing(8);
++  new_tab_row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++  new_tab_row->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(4, 8)));
++  new_tab_row->SetInstallFocusRingOnFocus(false);
++  views::InkDrop::Get(new_tab_row.get())
++      ->SetMode(views::InkDropHost::InkDropMode::ON);
++  views::InkDrop::Get(new_tab_row.get())
++      ->GetInkDrop()
++      ->SetShowHighlightOnHover(true);
++  views::InstallRoundRectHighlightPathGenerator(new_tab_row.get(),
++                                                gfx::Insets(), 8);
++  new_tab_row->SetProperty(
+       views::kMarginsKey,
+-      gfx::Insets::TLBR(0, region_horizontal_padding + 4, 10,
++      gfx::Insets::TLBR(6, region_horizontal_padding, 2,
+                         region_horizontal_padding));
+-  glint_pin_hint_ = AddChildView(std::move(pin_hint));
++  AddChildView(std::move(new_tab_row));
+ 
+   top_button_container_ =
+       AddChildView(std::make_unique<VerticalTabStripTopContainer>(
+@@ -333,6 +413,16 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   top_button_container_->SetVisible(false);
+   top_button_separator_->SetVisible(false);
+ 
++  // Glint: flexible spacer that pushes the space dots to the bottom edge (the
++  // stock bottom container that used to fill this space is hidden). The tab
++  // strip view is later reordered to sit right after the separator, i.e.
++  // above this spacer.
++  auto* glint_bottom_spacer = AddChildView(std::make_unique<views::View>());
++  glint_bottom_spacer->SetProperty(
++      views::kFlexBehaviorKey,
++      views::FlexSpecification(views::MinimumFlexSizeRule::kScaleToZero,
++                               views::MaximumFlexSizeRule::kUnbounded));
++
+   bottom_button_container_ =
+       AddChildView(std::make_unique<VerticalTabStripBottomContainer>(
+           state_controller_, root_action_item, browser_view->browser(),
+@@ -349,6 +439,8 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+           GetLayoutConstant(
+               LayoutConstant::kVerticalTabStripCollapsedVerticalPadding),
+           region_horizontal_padding, 0, region_horizontal_padding));
++  // Glint: hidden — replaced by the sidebar "New Tab" row above the tabs.
++  bottom_button_container_->SetVisible(false);
+ 
+   gemini_button_ = AddChildView(std::make_unique<views::View>());
+ 
+@@ -1438,6 +1530,13 @@ void VerticalTabStripRegionView::GlintAdoptOrphanTabs() {
+   }
+ }
+ 
++void VerticalTabStripRegionView::GlintNewTab() {
++  if (!glint_browser_) {
++    return;
++  }
++  chrome::AddTabAt(glint_browser_, GURL(), -1, /*foreground=*/true);
++}
++
+ void VerticalTabStripRegionView::GlintHandleNewTab() {
+   GlintAdoptOrphanTabs();
+   // Arc-style: a fresh, empty tab starts you in the address bar.
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index caf2c4b10f..22073d3406 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -307,6 +307,8 @@ class VerticalTabStripRegionView final
+   // Runs after a tab is inserted: adopts it into the active space and focuses
+   // the address bar when the new tab is empty (Arc-style new tab).
+   void GlintHandleNewTab();
++  // Opens a fresh foreground tab in the active space ("New Tab" row / "+").
++  void GlintNewTab();
+   int glint_active_space_ = 0;
+   std::array<std::optional<tab_groups::TabGroupId>, 3> glint_space_groups_;
+   std::array<raw_ptr<views::LabelButton>, 3> glint_space_dots_ = {};

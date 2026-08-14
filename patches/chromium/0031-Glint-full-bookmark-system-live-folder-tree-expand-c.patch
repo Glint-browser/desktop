@@ -1,0 +1,277 @@
+From a122dc2249e93a6da15e18476b6044e5d6c0f8f7 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 15:12:55 +0200
+Subject: [PATCH 31/60] Glint: full bookmark system - live folder tree,
+ expand/collapse, remove buttons, auto-refresh via BookmarkModelObserver
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 166 +++++++++++++++---
+ .../frame/vertical_tab_strip_region_view.h    |  25 ++-
+ 2 files changed, 162 insertions(+), 29 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 55c7261387..29ecfcc1e5 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -73,6 +73,8 @@
+ #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+ #include "components/bookmarks/browser/bookmark_model.h"
+ #include "components/bookmarks/browser/bookmark_node.h"
++#include "components/bookmarks/browser/bookmark_utils.h"
++#include "components/bookmarks/common/bookmark_metrics.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_tabstrip.h"
+ #include "chrome/browser/ui/tabs/tab_group_model.h"
+@@ -347,6 +349,14 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   bookmarks_list->SetVisible(false);
+   glint_bookmarks_list_ = AddChildView(std::move(bookmarks_list));
+ 
++  // Keep the list live: any bookmark change (star button, folder edits)
++  // triggers a rebuild while the list is open.
++  if (bookmarks::BookmarkModel* bookmark_model =
++          BookmarkModelFactory::GetForBrowserContext(
++              glint_browser_->profile())) {
++    glint_bookmark_observation_.Observe(bookmark_model);
++  }
++
+   // Glint: thin separator between the Bookmark row and the tab list, matching
+   // the reference sidebar.
+   auto* glint_list_separator =
+@@ -1532,47 +1542,149 @@ void VerticalTabStripRegionView::GlintToggleBookmarks() {
+     InvalidateLayout();
+     return;
+   }
++  glint_bookmarks_list_->SetVisible(true);
++  GlintRebuildBookmarksList();
++}
++
++void VerticalTabStripRegionView::GlintRebuildBookmarksList() {
++  if (!glint_bookmarks_list_ || !glint_browser_) {
++    return;
++  }
+   glint_bookmarks_list_->RemoveAllChildViews();
+   bookmarks::BookmarkModel* model =
+       BookmarkModelFactory::GetForBrowserContext(glint_browser_->profile());
+-  int shown = 0;
++  int row_budget = 40;
+   if (model && model->loaded()) {
+-    for (const auto& node : model->bookmark_bar_node()->children()) {
+-      if (shown >= 12) {
+-        break;
+-      }
+-      if (!node->is_url()) {
+-        continue;
+-      }
+-      auto row = std::make_unique<views::LabelButton>(
+-          base::BindRepeating(&VerticalTabStripRegionView::GlintOpenUrl,
+-                              base::Unretained(this), node->url()),
+-          node->GetTitle());
+-      row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+-      row->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(3, 8)));
+-      row->SetInstallFocusRingOnFocus(false);
+-      views::InkDrop::Get(row.get())
+-          ->SetMode(views::InkDropHost::InkDropMode::ON);
+-      views::InkDrop::Get(row.get())
+-          ->GetInkDrop()
+-          ->SetShowHighlightOnHover(true);
+-      views::InstallRoundRectHighlightPathGenerator(row.get(), gfx::Insets(),
+-                                                    8);
+-      glint_bookmarks_list_->AddChildView(std::move(row));
+-      ++shown;
+-    }
++    GlintAddBookmarkRows(model->bookmark_bar_node(), 0, row_budget);
++    GlintAddBookmarkRows(model->other_node(), 0, row_budget);
+   }
+-  if (shown == 0) {
++  if (row_budget == 40) {
+     auto empty = std::make_unique<views::Label>(
+         u"No bookmarks yet", views::style::CONTEXT_LABEL,
+         views::style::STYLE_SECONDARY);
+     empty->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+     glint_bookmarks_list_->AddChildView(std::move(empty));
+   }
+-  glint_bookmarks_list_->SetVisible(true);
+   InvalidateLayout();
+ }
+ 
++void VerticalTabStripRegionView::GlintAddBookmarkRows(
++    const bookmarks::BookmarkNode* folder,
++    int depth,
++    int& row_budget) {
++  for (const auto& node : folder->children()) {
++    if (row_budget <= 0) {
++      return;
++    }
++    const bool is_folder = node->is_folder();
++    if (!is_folder && !node->is_url()) {
++      continue;
++    }
++    --row_budget;
++    const int64_t node_id = node->id();
++    const bool expanded =
++        is_folder && glint_expanded_bookmark_folders_.contains(node_id);
++
++    auto row = std::make_unique<views::View>();
++    auto* row_box = row->SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kHorizontal));
++    row_box->set_cross_axis_alignment(
++        views::BoxLayout::CrossAxisAlignment::kCenter);
++    row->SetProperty(views::kMarginsKey,
++                     gfx::Insets::TLBR(0, depth * 12, 0, 0));
++
++    auto entry = std::make_unique<views::LabelButton>(
++        is_folder
++            ? base::BindRepeating(
++                  &VerticalTabStripRegionView::GlintToggleBookmarkFolder,
++                  base::Unretained(this), node_id)
++            : base::BindRepeating(&VerticalTabStripRegionView::GlintOpenUrl,
++                                  base::Unretained(this), node->url()),
++        node->GetTitle());
++    entry->SetImageModel(
++        views::Button::STATE_NORMAL,
++        ui::ImageModel::FromVectorIcon(
++            is_folder ? (expanded ? vector_icons::kFolderOpenIcon
++                                  : vector_icons::kFolderFilledIcon)
++                      : kStarIcon,
++            ui::kColorIcon, 16));
++    entry->SetImageLabelSpacing(8);
++    entry->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    entry->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(3, 8)));
++    entry->SetInstallFocusRingOnFocus(false);
++    views::InkDrop::Get(entry.get())
++        ->SetMode(views::InkDropHost::InkDropMode::ON);
++    views::InkDrop::Get(entry.get())
++        ->GetInkDrop()
++        ->SetShowHighlightOnHover(true);
++    views::InstallRoundRectHighlightPathGenerator(entry.get(), gfx::Insets(),
++                                                  8);
++    auto* entry_ptr = row->AddChildView(std::move(entry));
++    row_box->SetFlexForView(entry_ptr, 1);
++
++    if (!is_folder) {
++      auto remove_button =
++          std::make_unique<views::ImageButton>(base::BindRepeating(
++              &VerticalTabStripRegionView::GlintRemoveBookmark,
++              base::Unretained(this), node_id));
++      remove_button->SetImageModel(
++          views::Button::STATE_NORMAL,
++          ui::ImageModel::FromVectorIcon(vector_icons::kCloseIcon,
++                                         ui::kColorIcon, 12));
++      remove_button->SetTooltipText(u"Remove bookmark");
++      row->AddChildView(std::move(remove_button));
++    }
++    glint_bookmarks_list_->AddChildView(std::move(row));
++
++    if (expanded) {
++      GlintAddBookmarkRows(node.get(), depth + 1, row_budget);
++    }
++  }
++}
++
++void VerticalTabStripRegionView::GlintToggleBookmarkFolder(int64_t node_id) {
++  if (glint_expanded_bookmark_folders_.contains(node_id)) {
++    glint_expanded_bookmark_folders_.erase(node_id);
++  } else {
++    glint_expanded_bookmark_folders_.insert(node_id);
++  }
++  // Deferred: rebuilding destroys the clicked folder row, which must not be
++  // deleted from inside its own press callback.
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&VerticalTabStripRegionView::GlintRebuildBookmarksList,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
++void VerticalTabStripRegionView::GlintRemoveBookmark(int64_t node_id) {
++  if (!glint_browser_) {
++    return;
++  }
++  bookmarks::BookmarkModel* model =
++      BookmarkModelFactory::GetForBrowserContext(glint_browser_->profile());
++  if (!model || !model->loaded()) {
++    return;
++  }
++  const bookmarks::BookmarkNode* node =
++      bookmarks::GetBookmarkNodeByID(model, node_id);
++  if (!node || node->is_permanent_node()) {
++    return;
++  }
++  // The resulting model notification rebuilds the list via a posted task, so
++  // the row hosting this button is never deleted inside its own callback.
++  model->Remove(node, bookmarks::metrics::BookmarkEditSource::kUser, FROM_HERE);
++}
++
++void VerticalTabStripRegionView::BookmarkModelChanged() {
++  if (!glint_bookmarks_list_ || !glint_bookmarks_list_->GetVisible()) {
++    return;
++  }
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&VerticalTabStripRegionView::GlintRebuildBookmarksList,
++                     weak_ptr_factory_.GetWeakPtr()));
++}
++
+ void VerticalTabStripRegionView::GlintNewTab() {
+   if (!glint_browser_) {
+     return;
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index 46105afaac..e345826b86 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -8,8 +8,10 @@
+ #include <array>
+ #include <memory>
+ #include <optional>
++#include <set>
+ #include <vector>
+ 
++#include "components/bookmarks/browser/base_bookmark_model_observer.h"
+ #include "components/tab_groups/tab_group_id.h"
+ #include "url/gurl.h"
+ 
+@@ -46,6 +48,11 @@ class Browser;
+ class BrowserView;
+ class GURL;
+ class VerticalTabStripTopContainer;
++
++namespace bookmarks {
++class BookmarkModel;
++class BookmarkNode;
++}  // namespace bookmarks
+ class VerticalTabStripBottomContainer;
+ class ShadowFrameView;
+ 
+@@ -73,6 +80,7 @@ class VerticalTabStripRegionView final
+       public views::WidgetObserver,
+       public views::TextfieldController,
+       public AutocompleteController::Observer,
++      public bookmarks::BaseBookmarkModelObserver,
+       public TabStripModelObserver {
+   METADATA_HEADER(VerticalTabStripRegionView, BaseTabStripRegionView)
+ 
+@@ -309,10 +317,23 @@ class VerticalTabStripRegionView final
+   void GlintHandleNewTab();
+   // Opens a fresh foreground tab in the active space ("New Tab" row / "+").
+   void GlintNewTab();
+-  // Expands/collapses the bookmarks folder in the sidebar, listing the
+-  // bookmark bar's entries as clickable rows.
++  // Glint bookmarks: a live folder tree in the sidebar. The header row toggles
++  // the list, folder rows expand/collapse, URL rows navigate, and each URL row
++  // has a remove button. The list auto-refreshes on any bookmark change.
+   void GlintToggleBookmarks();
++  void GlintRebuildBookmarksList();
++  void GlintAddBookmarkRows(const bookmarks::BookmarkNode* folder,
++                            int depth,
++                            int& row_budget);
++  void GlintToggleBookmarkFolder(int64_t node_id);
++  void GlintRemoveBookmark(int64_t node_id);
++  // bookmarks::BaseBookmarkModelObserver:
++  void BookmarkModelChanged() override;
+   raw_ptr<views::View> glint_bookmarks_list_ = nullptr;
++  std::set<int64_t> glint_expanded_bookmark_folders_;
++  base::ScopedObservation<bookmarks::BookmarkModel,
++                          bookmarks::BookmarkModelObserver>
++      glint_bookmark_observation_{this};
+   int glint_active_space_ = 0;
+   std::array<std::optional<tab_groups::TabGroupId>, 3> glint_space_groups_;
+   std::array<raw_ptr<views::LabelButton>, 3> glint_space_dots_ = {};

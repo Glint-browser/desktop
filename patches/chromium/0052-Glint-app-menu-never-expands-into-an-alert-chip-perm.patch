@@ -1,0 +1,31 @@
+From 60cd8795ff0a3b268b00a79ca3d5a9e8281bf6e9 Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Wed, 12 Aug 2026 10:32:39 +0200
+Subject: [PATCH 52/60] Glint: app menu never expands into an alert chip
+ (permanent 'Error' pill in keyless builds)
+
+---
+ .../browser/ui/views/toolbar/browser_app_menu_button.cc   | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/chrome/browser/ui/views/toolbar/browser_app_menu_button.cc b/chrome/browser/ui/views/toolbar/browser_app_menu_button.cc
+index 4dedc2c68e..e378ffda6f 100644
+--- a/chrome/browser/ui/views/toolbar/browser_app_menu_button.cc
++++ b/chrome/browser/ui/views/toolbar/browser_app_menu_button.cc
+@@ -210,11 +210,13 @@ SkColor BrowserAppMenuButton::GetForegroundColor(ButtonState state) const {
+ }
+ 
+ void BrowserAppMenuButton::UpdateTextAndHighlightColor() {
+-  const std::u16string text = AppMenuIconController::GetIconLabel(
+-      type_and_severity_.type, type_and_severity_.severity);
++  // Glint: the app menu stays a plain ⋮ — no expanding alert chip. Dev/
++  // keyless builds have a permanent signin/update global error, which
++  // rendered as a persistent "Error" pill. The alert details remain
++  // available inside the menu itself.
+   SetTooltipText(AppMenuIconController::GetIconTooltip(
+       type_and_severity_.type, type_and_severity_.severity));
+-  SetHighlight(text, GetHighlightColor());
++  SetHighlight(std::u16string(), std::nullopt);
+ }
+ 
+ bool BrowserAppMenuButton::ShouldPaintBorder() const {

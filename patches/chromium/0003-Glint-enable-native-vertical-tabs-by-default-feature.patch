@@ -1,0 +1,58 @@
+From 69d356dcd73bca0e43c20a9822a367197e872544 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Sat, 4 Jul 2026 18:38:12 +0200
+Subject: [PATCH 03/60] Glint: enable native vertical tabs by default (feature
+ + pref); drop manual sidebar gap
+
+---
+ chrome/browser/ui/tabs/features.cc                         | 3 ++-
+ chrome/browser/ui/tabs/tab_strip_prefs.cc                  | 3 ++-
+ .../ui/views/frame/layout/browser_view_layout_impl.cc      | 7 -------
+ 3 files changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/chrome/browser/ui/tabs/features.cc b/chrome/browser/ui/tabs/features.cc
+index e9704aeea9..47ef310362 100644
+--- a/chrome/browser/ui/tabs/features.cc
++++ b/chrome/browser/ui/tabs/features.cc
+@@ -26,7 +26,8 @@ BASE_FEATURE(kSplitViewTabRestore, base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+ BASE_FEATURE(kTabSearchCjkWordBoundary, base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+-BASE_FEATURE(kVerticalTabs, base::FEATURE_DISABLED_BY_DEFAULT);
++// Glint: vertical tabs are our default sidebar UI.
++BASE_FEATURE(kVerticalTabs, base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ BASE_FEATURE(kVerticalTabsLaunch, base::FEATURE_DISABLED_BY_DEFAULT);
+ BASE_FEATURE_PARAM(bool,
+diff --git a/chrome/browser/ui/tabs/tab_strip_prefs.cc b/chrome/browser/ui/tabs/tab_strip_prefs.cc
+index b59d09cc68..e311a6e8e4 100644
+--- a/chrome/browser/ui/tabs/tab_strip_prefs.cc
++++ b/chrome/browser/ui/tabs/tab_strip_prefs.cc
+@@ -24,7 +24,8 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+   registry->RegisterBooleanPref(prefs::kTabSearchPinnedToTabstrip, true);
+   registry->RegisterBooleanPref(prefs::kProjectsPanelPinnedToTabstrip, true);
+   registry->RegisterBooleanPref(prefs::kEverythingMenuPinnedToTabstrip, true);
+-  registry->RegisterBooleanPref(prefs::kVerticalTabsEnabled, false);
++  // Glint: vertical tabs on by default.
++  registry->RegisterBooleanPref(prefs::kVerticalTabsEnabled, true);
+   registry->RegisterBooleanPref(
+       prefs::kVerticalTabsExpandOnHoverEnabled,
+       tabs::kVerticalTabsExpandOnHoverDefaultEnabled.Get());
+diff --git a/chrome/browser/ui/views/frame/layout/browser_view_layout_impl.cc b/chrome/browser/ui/views/frame/layout/browser_view_layout_impl.cc
+index 065e83b0a1..b03ab9ef09 100644
+--- a/chrome/browser/ui/views/frame/layout/browser_view_layout_impl.cc
++++ b/chrome/browser/ui/views/frame/layout/browser_view_layout_impl.cc
+@@ -213,13 +213,6 @@ void BrowserViewLayoutImpl::Layout(views::View* host) {
+     return;
+   }
+ 
+-  // Glint: reserve a fixed-width strip on the leading (left in LTR) edge for the
+-  // sidebar. Insetting the layout params here shifts the entire browser UI
+-  // right, leaving a gap that Glint's sidebar fills. First increment: just the
+-  // reserved space; the vertical tab list gets painted into it next.
+-  constexpr int kGlintSidebarWidth = 240;
+-  params.Inset(gfx::Insets::TLBR(0, kGlintSidebarWidth, 0, 0));
+-
+   DoPreLayoutComputations(params);
+ 
+   // If the top container is separate from the browser view, lay it out now.

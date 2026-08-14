@@ -1,0 +1,34 @@
+From 637ae1e2545a886ba7706f139d8c0e8b10187f40 Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Wed, 12 Aug 2026 10:24:15 +0200
+Subject: [PATCH 51/60] =?UTF-8?q?Glint:=20never=20create=20the=20avatar=20?=
+ =?UTF-8?q?toolbar=20button=20=E2=80=94=20hiding=20it=20was=20undone=20by?=
+ =?UTF-8?q?=20its=20own=20signin-error=20state=20(the=20toolbar=20'Error'?=
+ =?UTF-8?q?=20pill)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ chrome/browser/ui/views/toolbar/toolbar_view.cc | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+index 2e04352c8a..cb88118962 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -615,10 +615,10 @@ void ToolbarView::Init() {
+   }
+ 
+   if (!features::IsWebUIAvatarButtonEnabled()) {
+-    avatar_ =
+-        AddChildView(std::make_unique<AvatarToolbarButton>(browser_view_));
+-    // Glint: hide the profile avatar button for a cleaner, minimal toolbar.
+-    avatar_->SetVisible(false);
++    // Glint: no profile avatar button at all — merely hiding it is not
++    // enough, since it re-shows itself for signin/sync error states (the
++    // "Error" pill). All avatar_ uses are already null-safe because the
++    // WebUI-avatar configuration leaves it null too.
+   }
+ 
+   overflow_button_ = AddChildView(std::make_unique<OverflowButton>());

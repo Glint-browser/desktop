@@ -1,0 +1,148 @@
+From b783d8825843d3d939a383d8e0ef538d905b9d41 Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Wed, 12 Aug 2026 10:39:13 +0200
+Subject: [PATCH 53/60] Glint: /profile <name> suggests that profile's own
+ browsing history
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Each glint profile has its own HistoryService — while typing the URL part
+the palette queries the named profile's history (recent pages when empty)
+and Enter opens the hit as a tab in that profile. Typing never creates
+profile directories; history only resolves for existing profiles.
+---
+ .../ui/views/glint/glint_command_palette.cc   | 91 ++++++++++++++++---
+ 1 file changed, 79 insertions(+), 12 deletions(-)
+
+diff --git a/chrome/browser/ui/views/glint/glint_command_palette.cc b/chrome/browser/ui/views/glint/glint_command_palette.cc
+index c69e0dd127..ebdf3fdbbf 100644
+--- a/chrome/browser/ui/views/glint/glint_command_palette.cc
++++ b/chrome/browser/ui/views/glint/glint_command_palette.cc
+@@ -141,6 +141,29 @@ const GlintPaletteColors& PaletteColorsFor(Browser* browser) {
+ constexpr size_t kMaxTabRows = 8;
+ constexpr size_t kMaxHistoryRows = 8;
+ 
++// Loads an EXISTING glint profile (nullptr if the name is unknown) — typing
++// in the palette must never create profile directories as a side effect.
++Profile* GetGlintProfileIfExists(const std::string& name) {
++  ProfileManager* profile_manager = g_browser_process->profile_manager();
++  if (!profile_manager) {
++    return nullptr;
++  }
++  std::string dir_name = "glint-";
++  for (char c : name) {
++    dir_name += base::IsAsciiAlphaNumeric(c) ? base::ToLowerASCII(c) : '-';
++  }
++  const base::FilePath path =
++      profile_manager->user_data_dir().AppendASCII(dir_name);
++  for (const ProfileAttributesEntry* entry :
++       profile_manager->GetProfileAttributesStorage()
++           .GetAllProfilesAttributes()) {
++    if (entry->GetPath() == path) {
++      return profile_manager->GetProfile(path);
++    }
++  }
++  return nullptr;
++}
++
+ // URL-or-search heuristic, mirroring the Glint Electron shell. Searches go
+ // through the browser's real default search engine.
+ GURL ToNavigableUrl(Browser* browser, const std::u16string& query) {
+@@ -325,7 +348,8 @@ class GlintCommandPaletteView : public LocationBarBubbleDelegateView,
+       kHistory,
+       kProfile,
+       kProfileName,
+-      kProfileHint
++      kProfileHint,
++      kProfileHistory
+     };
+     Type type;
+     std::u16string label;
+@@ -354,18 +378,40 @@ class GlintCommandPaletteView : public LocationBarBubbleDelegateView,
+       const std::u16string rest = std::u16string(
+           base::TrimWhitespace(query.substr(8), base::TRIM_ALL));
+       const size_t space = rest.find(u' ');
+-      if (space != std::u16string::npos && space + 1 < rest.size()) {
++      if (space != std::u16string::npos) {
+         const std::string name = base::UTF16ToUTF8(rest.substr(0, space));
+-        const std::u16string url = rest.substr(space + 1);
+-        Row row;
+-        row.type = Row::Type::kProfile;
+-        row.label = u"Open " + url + u" in \"" +
+-                    base::UTF8ToUTF16(name) + u"\"";
+-        row.meta = u"Profile";
+-        row.icon = VectorIcon(vector_icons::kAccountCircleIcon);
+-        row.profile_name = name;
+-        row.profile_url = url;
+-        rows_.push_back(std::move(row));
++        const std::u16string url = std::u16string(
++            base::TrimWhitespace(rest.substr(space + 1), base::TRIM_ALL));
++        if (!url.empty()) {
++          Row row;
++          row.type = Row::Type::kProfile;
++          row.label = u"Open " + url + u" in \"" +
++                      base::UTF8ToUTF16(name) + u"\"";
++          row.meta = u"Profile";
++          row.icon = VectorIcon(vector_icons::kAccountCircleIcon);
++          row.profile_name = name;
++          row.profile_url = url;
++          rows_.push_back(std::move(row));
++        }
++        // The profile's OWN history: suggest pages previously visited in
++        // this named session (recent pages when the URL part is empty).
++        tracker_.TryCancelAll();
++        Profile* glint_profile = GetGlintProfileIfExists(name);
++        if (glint_profile) {
++          history::HistoryService* profile_history =
++              HistoryServiceFactory::GetForProfile(
++                  glint_profile, ServiceAccessType::EXPLICIT_ACCESS);
++          if (profile_history) {
++            history::QueryOptions options;
++            options.max_count = kMaxHistoryRows;
++            profile_history->QueryHistory(
++                url, options,
++                base::BindOnce(
++                    &GlintCommandPaletteView::OnProfileHistoryResults,
++                    base::Unretained(this), name),
++                &tracker_);
++          }
++        }
+       } else {
+         // Suggest existing profiles (filtered by the partial name typed);
+         // Enter prefills "/profile <name> " ready for the URL.
+@@ -454,6 +500,23 @@ class GlintCommandPaletteView : public LocationBarBubbleDelegateView,
+     }
+   }
+ 
++  void OnProfileHistoryResults(const std::string& profile_name,
++                               history::QueryResults results) {
++    for (const history::URLResult& result : results) {
++      Row row;
++      row.type = Row::Type::kProfileHistory;
++      row.label = result.title().empty()
++                      ? base::UTF8ToUTF16(result.url().spec())
++                      : result.title();
++      row.meta = base::UTF8ToUTF16(profile_name);
++      row.icon = VectorIcon(vector_icons::kHistoryIcon);
++      row.profile_name = profile_name;
++      row.url = result.url();
++      rows_.push_back(std::move(row));
++    }
++    RebuildList();
++  }
++
+   void OnHistoryResults(history::QueryResults results) {
+     TabStripModel* tabs = browser_->tab_strip_model();
+     for (const history::URLResult& result : results) {
+@@ -519,6 +582,10 @@ class GlintCommandPaletteView : public LocationBarBubbleDelegateView,
+       case Row::Type::kProfile:
+         OpenUrlInGlintProfile(browser, row.profile_name, row.profile_url);
+         break;
++      case Row::Type::kProfileHistory:
++        OpenUrlInGlintProfile(browser, row.profile_name,
++                              base::UTF8ToUTF16(row.url.spec()));
++        break;
+       case Row::Type::kNewTab:
+         chrome::NewTab(browser, NewTabTypes::kNewTabCommand);
+         break;

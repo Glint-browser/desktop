@@ -1,0 +1,26 @@
+From 0e539724353c649ab3dca921c34ebc720fe9e369 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 10:29:19 +0200
+Subject: [PATCH 26/60] Glint: top container paints frame color with vertical
+ tabs - fixes white notch behind traffic lights
+
+---
+ .../ui/views/frame/layout/browser_view_tabbed_layout_impl.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
+index c3f8b66316..a60e9d398b 100644
+--- a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
++++ b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
+@@ -1357,6 +1357,11 @@ void BrowserViewTabbedLayoutImpl::ConfigureTopContainerBackground(
+       IsParentedTo(views().horizontal_tab_strip_region_view,
+                    views().top_container)) {
+     background->SetPrimaryColor(ui::kColorFrameActive);
++  } else if (GetTabStripType() == TabStripType::kVertical) {
++    // Glint: the full-width top strip (including the traffic-light zone the
++    // toolbar is excluded from) paints the frame color, so the strip and the
++    // sidebar read as one continuous surface.
++    background->SetPrimaryColor(CustomCornersBackground::FrameTheme());
+   } else {
+     background->SetPrimaryColor(CustomCornersBackground::ToolbarTheme());
+   }

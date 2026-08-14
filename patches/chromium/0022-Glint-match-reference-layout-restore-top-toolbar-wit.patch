@@ -1,0 +1,178 @@
+From 77f460b4e3c6d9607a93fda2fc5a777f2d461f6b Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 09:17:42 +0200
+Subject: [PATCH 22/60] Glint: match reference layout - restore top toolbar
+ with omnibox hidden, remove sidebar nav row, flat joined content, list
+ separator, left-aligned dots
+
+---
+ chrome/browser/ui/views/frame/browser_view.cc | 11 +---
+ .../ui/views/frame/contents_container_view.cc | 10 ----
+ .../frame/vertical_tab_strip_region_view.cc   | 56 ++++---------------
+ .../browser/ui/views/toolbar/toolbar_view.cc  |  8 +++
+ 4 files changed, 20 insertions(+), 65 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/browser_view.cc b/chrome/browser/ui/views/frame/browser_view.cc
+index 86a2e93fe2..da4d28fe85 100644
+--- a/chrome/browser/ui/views/frame/browser_view.cc
++++ b/chrome/browser/ui/views/frame/browser_view.cc
+@@ -2972,13 +2972,6 @@ bool BrowserView::IsToolbarVisible() const {
+   // widget, so |toolbar_| is still null.  Return false in this case so callers
+   // don't assume they can access the toolbar yet.
+   //
+-  // Glint: hide the top toolbar entirely for the Arc-style layout — the window
+-  // becomes just [ vertical tab sidebar | content ]. Navigation lives in the
+-  // sidebar / command palette. Keep the toolbar for non-normal windows (popups,
+-  // apps) which rely on it.
+-  if (browser_->is_type_normal() && toolbar_) {
+-    return false;
+-  }
+   return (browser_->SupportsWindowFeature(
+               Browser::WindowFeature::kFeatureToolbar) ||
+           browser_->SupportsWindowFeature(
+@@ -5923,9 +5916,7 @@ void BrowserView::FrameColorsChanged() {
+     web_app_window_title_->SetBackgroundColor(frame_color);
+     web_app_window_title_->SetEnabledColor(caption_color);
+   }
+-  // Glint: fill the widget with the frame color so the margin around the
+-  // floating rounded content card reads as the sidebar gray (Arc style).
+-  GetWidget()->SetBackgroundColor(ui::kColorFrameActive);
++  GetWidget()->SetBackgroundColor(kColorToolbar);
+ }
+ 
+ void BrowserView::UpdateAccessibleNameForAllTabs() {
+diff --git a/chrome/browser/ui/views/frame/contents_container_view.cc b/chrome/browser/ui/views/frame/contents_container_view.cc
+index 96c4043f68..b203f07a4f 100644
+--- a/chrome/browser/ui/views/frame/contents_container_view.cc
++++ b/chrome/browser/ui/views/frame/contents_container_view.cc
+@@ -171,10 +171,6 @@ ContentsContainerView::ContentsContainerView(BrowserView* browser_view)
+       AddChildView(std::make_unique<ContentsCaptureBorderView>(mini_toolbar_));
+ 
+   view_bounds_observer_.Observe(contents_view_);
+-
+-  // Glint: the web contents render as a floating rounded card (Arc style).
+-  // The margin around it is applied in CalculateProposedLayout().
+-  SetRoundedCorners(gfx::RoundedCornersF(12.0f));
+ }
+ 
+ ContentsContainerView::~ContentsContainerView() {
+@@ -676,12 +672,6 @@ views::ProposedLayout ContentsContainerView::CalculateProposedLayout(
+   }
+ 
+   auto* const content_layout = layouts.GetLayoutFor(contents_view_);
+-  // Glint: float the web content in a rounded "card" by insetting it, leaving a
+-  // margin of the neutral background around it on all sides (the Arc/Glint look).
+-  constexpr int kGlintContentMargin = 10;
+-  content_layout->bounds.Inset(gfx::Insets::TLBR(
+-      kGlintContentMargin, kGlintContentMargin, kGlintContentMargin,
+-      kGlintContentMargin));
+   if (target_content_bounds_) {
+     content_layout->bounds.Outset(*target_content_bounds_);
+     contents_clip_rect_ =
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 6459b0540c..8a9f37017a 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -156,8 +156,6 @@ namespace {
+ // Glint's single brand accent, reused everywhere a purple highlight appears
+ // (active space dot, suggestion selection) so they can never drift apart.
+ constexpr SkColor kGlintAccentPurple = SkColorSetRGB(0x7c, 0x5c, 0xff);
+-// Horizontal space to clear the macOS traffic-light window controls.
+-constexpr int kGlintTrafficLightClearance = 78;
+ }  // namespace
+ 
+ DEFINE_CLASS_CUSTOM_ELEMENT_EVENT_TYPE(VerticalTabStripRegionView,
+@@ -200,48 +198,6 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   glint_browser_ = browser_view->browser();
+   glint_browser_->tab_strip_model()->AddObserver(this);
+ 
+-  // Glint: back / forward / reload buttons at the very top of the sidebar,
+-  // to the right of the macOS traffic lights (Arc style).
+-  using GlintNavCommand = void (*)(BrowserWindowInterface*,
+-                                   WindowOpenDisposition);
+-  auto make_nav_button = [this](GlintNavCommand command,
+-                                const gfx::VectorIcon& icon,
+-                                std::u16string_view tooltip) {
+-    auto button = std::make_unique<views::ImageButton>(base::BindRepeating(
+-        command,
+-        base::Unretained(
+-            static_cast<BrowserWindowInterface*>(glint_browser_.get())),
+-        WindowOpenDisposition::CURRENT_TAB));
+-    button->SetImageModel(
+-        views::Button::STATE_NORMAL,
+-        ui::ImageModel::FromVectorIcon(icon, ui::kColorIcon, 18));
+-    button->SetTooltipText(std::u16string(tooltip));
+-    button->SetInstallFocusRingOnFocus(false);
+-    views::InkDrop::Get(button.get())
+-        ->SetMode(views::InkDropHost::InkDropMode::ON);
+-    views::InkDrop::Get(button.get())
+-        ->GetInkDrop()
+-        ->SetShowHighlightOnHover(true);
+-    views::InstallRoundRectHighlightPathGenerator(button.get(), gfx::Insets(),
+-                                                  6);
+-    return button;
+-  };
+-  auto nav_row = std::make_unique<views::View>();
+-  auto* nav_box = nav_row->SetLayoutManager(std::make_unique<views::BoxLayout>(
+-      views::BoxLayout::Orientation::kHorizontal));
+-  nav_box->set_between_child_spacing(10);
+-  nav_row->SetProperty(
+-      views::kMarginsKey,
+-      gfx::Insets::TLBR(8, kGlintTrafficLightClearance, 2,
+-                        region_horizontal_padding));
+-  nav_row->AddChildView(
+-      make_nav_button(&chrome::GoBack, kArrowBackIcon, u"Back"));
+-  nav_row->AddChildView(
+-      make_nav_button(&chrome::GoForward, kArrowForwardIcon, u"Forward"));
+-  nav_row->AddChildView(
+-      make_nav_button(&chrome::Reload, vector_icons::kRefreshIcon, u"Reload"));
+-  AddChildView(std::move(nav_row));
+-
+   // Address bar row: the text field plus a trailing "copy link" button.
+   // BoxLayout keeps the row at the text field's natural height (the field
+   // flexes to fill width; the button stays fixed).
+@@ -355,6 +311,15 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+                         region_horizontal_padding));
+   AddChildView(std::move(bookmarks_row));
+ 
++  // Glint: thin separator between the Bookmark row and the tab list, matching
++  // the reference sidebar.
++  auto* glint_list_separator =
++      AddChildView(std::make_unique<views::Separator>());
++  glint_list_separator->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(8, region_horizontal_padding, 4,
++                        region_horizontal_padding));
++
+   // Glint: "+ New Tab" row above the tab list (Arc style). Replaces the stock
+   // bottom "+" pill.
+   auto new_tab_row = std::make_unique<views::LabelButton>(
+@@ -440,7 +405,8 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   auto* dots_layout =
+       space_dots->SetLayoutManager(std::make_unique<views::FlexLayout>());
+   dots_layout->SetOrientation(views::LayoutOrientation::kHorizontal);
+-  dots_layout->SetMainAxisAlignment(views::LayoutAlignment::kCenter);
++  // Left-aligned like the reference (dots sit at the bottom-left corner).
++  dots_layout->SetMainAxisAlignment(views::LayoutAlignment::kStart);
+   dots_layout->SetCrossAxisAlignment(views::LayoutAlignment::kCenter);
+   space_dots->SetProperty(
+       views::kMarginsKey,
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+index d95eaa68af..a37e97df37 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -469,6 +469,14 @@ void ToolbarView::Init() {
+     location_bar_ = toolbar_webview_->GetLocationBar();
+   }
+ 
++  // Glint: the omnibox lives in the sidebar. The top toolbar keeps only
++  // navigation, extensions and menus (reference design).
++  if (location_bar_view_) {
++    location_bar_view_->SetVisible(false);
++  } else if (toolbar_webview_) {
++    toolbar_webview_->SetVisible(false);
++  }
++
+   bool is_glic_left_of_profile =
+       features::kGlicToolbarButtonLocationParam.Get() ==
+           features::GlicToolbarButtonLocation::kLeftOfProfileChip ||

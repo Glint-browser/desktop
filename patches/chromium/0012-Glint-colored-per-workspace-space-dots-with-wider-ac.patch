@@ -1,0 +1,73 @@
+From 7fc5a46350d7705e60ee902b0a341ba3ad3556be Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Sun, 5 Jul 2026 23:59:58 +0200
+Subject: [PATCH 12/60] Glint: colored per-workspace space dots with wider
+ active pill
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 37 +++++++++++++++++++
+ 1 file changed, 37 insertions(+)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index fee8e31d1d..c0b7a25750 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
+ 
+ #include <algorithm>
++#include <array>
+ #include <optional>
+ #include <variant>
+ 
+@@ -66,7 +67,9 @@
+ #include "ui/display/screen.h"
+ #include "ui/events/event.h"
+ #include "components/vector_icons/vector_icons.h"
++#include "third_party/skia/include/core/SkColor.h"
+ #include "ui/base/models/image_model.h"
++#include "ui/gfx/geometry/size.h"
+ #include "ui/gfx/text_constants.h"
+ #include "ui/views/controls/image_view.h"
+ #include "ui/views/controls/label.h"
+@@ -241,6 +244,40 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+ 
+   gemini_button_ = AddChildView(std::make_unique<views::View>());
+ 
++  // Glint: Arc-style space indicator dots pinned to the bottom of the sidebar.
++  // Added after the (flex-growing) bottom button container so they sit at the
++  // very bottom edge. Decorative for now until real spaces exist.
++  auto space_dots = std::make_unique<views::View>();
++  auto* dots_layout =
++      space_dots->SetLayoutManager(std::make_unique<views::FlexLayout>());
++  dots_layout->SetOrientation(views::LayoutOrientation::kHorizontal);
++  dots_layout->SetMainAxisAlignment(views::LayoutAlignment::kCenter);
++  dots_layout->SetCrossAxisAlignment(views::LayoutAlignment::kCenter);
++  space_dots->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(4, region_horizontal_padding, 14,
++                        region_horizontal_padding));
++  // One entry per workspace. Distinct accent colors; the active space renders
++  // as a wider pill, the others as small circles. Range-based iteration avoids
++  // raw array indexing (-Wunsafe-buffer-usage).
++  constexpr size_t kGlintActiveSpace = 0;
++  const std::array<SkColor, 3> kGlintSpaceColors = {
++      SkColorSetRGB(0x7c, 0x5c, 0xff),  // purple
++      SkColorSetRGB(0x27, 0xae, 0x8f),  // teal
++      SkColorSetRGB(0xef, 0x9a, 0x3d),  // amber
++  };
++  size_t space_index = 0;
++  for (SkColor color : kGlintSpaceColors) {
++    const bool active = (space_index == kGlintActiveSpace);
++    auto dot = std::make_unique<views::View>();
++    dot->SetPreferredSize(active ? gfx::Size(22, 8) : gfx::Size(8, 8));
++    dot->SetBackground(views::CreateRoundedRectBackground(color, 4.f));
++    dot->SetProperty(views::kMarginsKey, gfx::Insets::VH(0, 3));
++    space_dots->AddChildView(std::move(dot));
++    ++space_index;
++  }
++  AddChildView(std::move(space_dots));
++
+   resize_area_ = AddChildView(std::make_unique<views::ResizeArea>(this));
+   resize_area_->SetProperty(views::kViewIgnoredByLayoutKey, true);
+   resize_area_->SetFocusBehavior(views::View::FocusBehavior::ACCESSIBLE_ONLY);

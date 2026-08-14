@@ -1,0 +1,45 @@
+From d9b8e1c76e52e0e567d996f5f1da26ad8ee72651 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Sat, 4 Jul 2026 03:13:18 +0200
+Subject: [PATCH 02/60] Glint sidebar: reserve left region in window layout +
+ side panel defaults left
+
+---
+ chrome/browser/ui/side_panel/side_panel_prefs.cc           | 4 +++-
+ .../ui/views/frame/layout/browser_view_layout_impl.cc      | 7 +++++++
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/ui/side_panel/side_panel_prefs.cc b/chrome/browser/ui/side_panel/side_panel_prefs.cc
+index faccbffb95..046a01fb34 100644
+--- a/chrome/browser/ui/side_panel/side_panel_prefs.cc
++++ b/chrome/browser/ui/side_panel/side_panel_prefs.cc
+@@ -28,8 +28,10 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+   // Otherwise, the side panel should default to the right side of the screen.
+   // TODO(dljames): Add enum values kAlternateSide / kDefaultSide that will
+   // replace false and true respectively.
++  // Glint: default the side panel to the leading (left, in LTR) side — this is
++  // where Glint's Arc-style sidebar lives.
+   registry->RegisterBooleanPref(prefs::kSidePanelHorizontalAlignment,
+-                                !base::i18n::IsRTL());
++                                base::i18n::IsRTL());
+   registry->RegisterBooleanPref(prefs::kGoogleSearchSidePanelEnabled, true);
+   registry->RegisterDictionaryPref(prefs::kSidePanelIdToWidth);
+ 
+diff --git a/chrome/browser/ui/views/frame/layout/browser_view_layout_impl.cc b/chrome/browser/ui/views/frame/layout/browser_view_layout_impl.cc
+index b03ab9ef09..065e83b0a1 100644
+--- a/chrome/browser/ui/views/frame/layout/browser_view_layout_impl.cc
++++ b/chrome/browser/ui/views/frame/layout/browser_view_layout_impl.cc
+@@ -213,6 +213,13 @@ void BrowserViewLayoutImpl::Layout(views::View* host) {
+     return;
+   }
+ 
++  // Glint: reserve a fixed-width strip on the leading (left in LTR) edge for the
++  // sidebar. Insetting the layout params here shifts the entire browser UI
++  // right, leaving a gap that Glint's sidebar fills. First increment: just the
++  // reserved space; the vertical tab list gets painted into it next.
++  constexpr int kGlintSidebarWidth = 240;
++  params.Inset(gfx::Insets::TLBR(0, kGlintSidebarWidth, 0, 0));
++
+   DoPreLayoutComputations(params);
+ 
+   // If the top container is separate from the browser view, lay it out now.

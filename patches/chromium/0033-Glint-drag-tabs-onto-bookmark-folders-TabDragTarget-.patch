@@ -1,0 +1,291 @@
+From 27a711f8eb2002311c542407ba419c5ed6ce7188 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 15:46:18 +0200
+Subject: [PATCH 33/60] Glint: drag tabs onto bookmark folders (TabDragTarget)
+ + inline folder-name editor on create
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 162 ++++++++++++++++--
+ .../frame/vertical_tab_strip_region_view.h    |  25 +++
+ 2 files changed, 177 insertions(+), 10 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 7217dce01c..7d2ec4b955 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -73,6 +73,8 @@
+ #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+ #include "components/bookmarks/browser/bookmark_model.h"
+ #include "components/bookmarks/browser/bookmark_node.h"
++#include "chrome/browser/ui/views/tabs/common/tab_drag_handler.h"
++#include "chrome/browser/ui/views/tabs/dragging/drag_session_data.h"
+ #include "components/bookmarks/browser/bookmark_utils.h"
+ #include "components/bookmarks/common/bookmark_metrics.h"
+ #include "chrome/browser/ui/browser_commands.h"
+@@ -516,6 +518,8 @@ VerticalTabStripRegionView::~VerticalTabStripRegionView() {
+   if (glint_browser_) {
+     glint_browser_->tab_strip_model()->RemoveObserver(this);
+   }
++  // Glint: tell any active drag session this drop target is going away.
++  glint_drop_target_destroy_callbacks_.Notify();
+ }
+ 
+ bool VerticalTabStripRegionView::IsAnimatingSize() const {
+@@ -1529,22 +1533,44 @@ void VerticalTabStripRegionView::GlintAdoptOrphanTabs() {
+ }
+ 
+ void VerticalTabStripRegionView::GlintCreateBookmarkFolder() {
+-  if (!glint_browser_) {
++  if (!glint_bookmarks_list_ || !glint_browser_) {
+     return;
+   }
+-  bookmarks::BookmarkModel* model =
+-      BookmarkModelFactory::GetForBrowserContext(glint_browser_->profile());
+-  if (!model || !model->loaded()) {
++  if (glint_folder_name_field_) {
++    glint_folder_name_field_->RequestFocus();
+     return;
+   }
+-  model->AddFolder(model->bookmark_bar_node(), 0, u"New Folder");
+-  // The model notification rebuilds the tree, making the folder appear.
++  // Inline name editor at the top of the tree: type the name, Enter creates
++  // the folder, Esc cancels.
++  auto name_row = std::make_unique<views::View>();
++  auto* name_box =
++      name_row->SetLayoutManager(std::make_unique<views::BoxLayout>(
++          views::BoxLayout::Orientation::kHorizontal));
++  name_box->set_cross_axis_alignment(
++      views::BoxLayout::CrossAxisAlignment::kCenter);
++  name_box->set_between_child_spacing(8);
++  auto folder_icon =
++      std::make_unique<views::ImageView>(ui::ImageModel::FromVectorIcon(
++          vector_icons::kFolderFilledIcon, ui::kColorIcon, 16));
++  name_row->AddChildView(std::move(folder_icon));
++  auto name_field = std::make_unique<views::Textfield>();
++  name_field->SetPlaceholderText(u"Folder name");
++  name_field->set_controller(this);
++  glint_folder_name_field_ = name_row->AddChildView(std::move(name_field));
++  name_box->SetFlexForView(glint_folder_name_field_, 1);
++  glint_bookmarks_list_->AddChildViewAt(std::move(name_row), 0);
++  glint_bookmarks_list_->SetVisible(true);
++  InvalidateLayout();
++  glint_folder_name_field_->RequestFocus();
+ }
+ 
+ void VerticalTabStripRegionView::GlintRebuildBookmarksList() {
+   if (!glint_bookmarks_list_ || !glint_browser_) {
+     return;
+   }
++  // The rows (including any inline name editor) are about to be destroyed.
++  glint_folder_name_field_ = nullptr;
++  glint_folder_row_ids_.clear();
+   glint_bookmarks_list_->RemoveAllChildViews();
+   bookmarks::BookmarkModel* model =
+       BookmarkModelFactory::GetForBrowserContext(glint_browser_->profile());
+@@ -1624,7 +1650,11 @@ void VerticalTabStripRegionView::GlintAddBookmarkRows(
+       remove_button->SetTooltipText(u"Remove bookmark");
+       row->AddChildView(std::move(remove_button));
+     }
+-    glint_bookmarks_list_->AddChildView(std::move(row));
++    auto* row_ptr = glint_bookmarks_list_->AddChildView(std::move(row));
++    if (is_folder) {
++      // Registered as a tab-drag drop zone: dropping a tab here files it.
++      glint_folder_row_ids_[row_ptr] = node_id;
++    }
+ 
+     if (expanded) {
+       GlintAddBookmarkRows(node.get(), depth + 1, row_budget);
+@@ -1675,6 +1705,86 @@ void VerticalTabStripRegionView::BookmarkModelChanged() {
+                      weak_ptr_factory_.GetWeakPtr()));
+ }
+ 
++TabDragTarget* VerticalTabStripRegionView::GetTabDragTarget(
++    const gfx::Point& point_in_screen) {
++  // A drag over a bookmark folder row targets Glint's drop-to-file behavior;
++  // anywhere else falls through to the stock tab-strip drag handling.
++  if (GlintFolderIdAtScreenPoint(point_in_screen).has_value()) {
++    glint_last_drag_point_ = point_in_screen;
++    return this;
++  }
++  return BaseTabStripRegionView::GetTabDragTarget(point_in_screen);
++}
++
++std::optional<int64_t> VerticalTabStripRegionView::GlintFolderIdAtScreenPoint(
++    const gfx::Point& point_in_screen) const {
++  if (!glint_bookmarks_list_ || !glint_bookmarks_list_->GetVisible()) {
++    return std::nullopt;
++  }
++  for (const auto& [row, node_id] : glint_folder_row_ids_) {
++    if (row->GetBoundsInScreen().Contains(point_in_screen)) {
++      return node_id;
++    }
++  }
++  return std::nullopt;
++}
++
++void VerticalTabStripRegionView::OnTabDragEntered() {}
++
++TabDragContext* VerticalTabStripRegionView::OnTabDragUpdated(
++    TabDragTarget::DragController& controller,
++    const gfx::Point& point_in_screen) {
++  glint_last_drag_point_ = point_in_screen;
++  // Keep the dragged tab attached to this window's strip while it hovers a
++  // folder row, instead of tearing off into a new window.
++  return drag_handler_ ? drag_handler_->GetDragContext() : nullptr;
++}
++
++void VerticalTabStripRegionView::OnTabDragExited(
++    const gfx::Point& point_in_screen) {}
++
++void VerticalTabStripRegionView::OnTabDragEnded() {}
++
++bool VerticalTabStripRegionView::CanDropTab() {
++  return GlintFolderIdAtScreenPoint(glint_last_drag_point_).has_value();
++}
++
++void VerticalTabStripRegionView::HandleTabDrop(
++    TabDragTarget::DragController& controller) {
++  const std::optional<int64_t> folder_id =
++      GlintFolderIdAtScreenPoint(glint_last_drag_point_);
++  content::WebContents* contents =
++      controller.GetSessionData().source_dragged_contents();
++  if (!folder_id || !contents || !glint_browser_) {
++    return;
++  }
++  bookmarks::BookmarkModel* model =
++      BookmarkModelFactory::GetForBrowserContext(glint_browser_->profile());
++  if (!model || !model->loaded()) {
++    return;
++  }
++  const bookmarks::BookmarkNode* folder =
++      bookmarks::GetBookmarkNodeByID(model, *folder_id);
++  const GURL url = contents->GetLastCommittedURL();
++  if (!folder || !folder->is_folder() || !url.is_valid()) {
++    return;
++  }
++  std::u16string title(contents->GetTitle());
++  if (title.empty()) {
++    title = base::UTF8ToUTF16(url.spec());
++  }
++  model->AddURL(folder, 0, title, url);
++  // Auto-expand the folder so the drop result is immediately visible (the
++  // model notification rebuilds the tree).
++  glint_expanded_bookmark_folders_.insert(*folder_id);
++}
++
++base::CallbackListSubscription
++VerticalTabStripRegionView::RegisterWillDestroyCallback(
++    base::OnceClosure callback) {
++  return glint_drop_target_destroy_callbacks_.Add(std::move(callback));
++}
++
+ void VerticalTabStripRegionView::GlintNewTab() {
+   if (!glint_browser_) {
+     return;
+@@ -1760,6 +1870,36 @@ bool VerticalTabStripRegionView::HandleKeyEvent(
+   if (key_event.type() != ui::EventType::kKeyPressed) {
+     return false;
+   }
++  // Glint: the inline folder-name editor. Enter creates the folder with the
++  // typed name; Esc cancels.
++  if (sender == glint_folder_name_field_) {
++    if (key_event.key_code() == ui::VKEY_RETURN) {
++      std::u16string name(sender->GetText());
++      if (name.empty()) {
++        name = u"New Folder";
++      }
++      glint_folder_name_field_ = nullptr;
++      bookmarks::BookmarkModel* model = BookmarkModelFactory::GetForBrowserContext(
++          glint_browser_->profile());
++      if (model && model->loaded()) {
++        // The model notification rebuilds the tree (replacing the editor row).
++        model->AddFolder(model->bookmark_bar_node(), 0, name);
++      }
++      return true;
++    }
++    if (key_event.key_code() == ui::VKEY_ESCAPE) {
++      glint_folder_name_field_ = nullptr;
++      base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++          FROM_HERE,
++          base::BindOnce(&VerticalTabStripRegionView::GlintRebuildBookmarksList,
++                         weak_ptr_factory_.GetWeakPtr()));
++      return true;
++    }
++    return false;
++  }
++  if (sender != glint_address_bar_) {
++    return false;
++  }
+   const int suggestion_count = static_cast<int>(glint_suggestion_urls_.size());
+   const bool have_suggestions =
+       glint_suggestions_ && glint_suggestions_->GetVisible() &&
+@@ -1808,9 +1948,11 @@ bool VerticalTabStripRegionView::HandleKeyEvent(
+ void VerticalTabStripRegionView::ContentsChanged(
+     views::Textfield* sender,
+     const std::u16string& new_contents) {
+-  // Only drive autocomplete for real user typing, not the programmatic URL sync
+-  // in UpdateGlintAddressBar().
+-  if (!glint_autocomplete_ || !glint_browser_ || !sender->HasFocus()) {
++  // Only the address bar drives autocomplete (not the folder-name editor), and
++  // only for real user typing, not the programmatic URL sync in
++  // UpdateGlintAddressBar().
++  if (sender != glint_address_bar_ || !glint_autocomplete_ || !glint_browser_ ||
++      !sender->HasFocus()) {
+     return;
+   }
+   if (new_contents.empty()) {
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index fb96a76a62..d69da5b5aa 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -6,11 +6,13 @@
+ #define CHROME_BROWSER_UI_VIEWS_FRAME_VERTICAL_TAB_STRIP_REGION_VIEW_H_
+ 
+ #include <array>
++#include <map>
+ #include <memory>
+ #include <optional>
+ #include <set>
+ #include <vector>
+ 
++#include "chrome/browser/ui/views/tabs/dragging/tab_drag_target.h"
+ #include "components/bookmarks/browser/base_bookmark_model_observer.h"
+ #include "components/tab_groups/tab_group_id.h"
+ #include "url/gurl.h"
+@@ -81,6 +83,7 @@ class VerticalTabStripRegionView final
+       public views::TextfieldController,
+       public AutocompleteController::Observer,
+       public bookmarks::BaseBookmarkModelObserver,
++      public TabDragTarget,
+       public TabStripModelObserver {
+   METADATA_HEADER(VerticalTabStripRegionView, BaseTabStripRegionView)
+ 
+@@ -335,6 +338,28 @@ class VerticalTabStripRegionView final
+   base::ScopedObservation<bookmarks::BookmarkModel,
+                           bookmarks::BookmarkModelObserver>
+       glint_bookmark_observation_{this};
++
++  // Glint: dropping a dragged tab onto a folder row files it into that folder
++  // (instead of tearing off into a new window). Shadows the base class's
++  // non-virtual method; BrowserView calls through this type.
++  TabDragTarget* GetTabDragTarget(const gfx::Point& point_in_screen);
++  std::optional<int64_t> GlintFolderIdAtScreenPoint(
++      const gfx::Point& point_in_screen) const;
++  // TabDragTarget:
++  void OnTabDragEntered() override;
++  TabDragContext* OnTabDragUpdated(TabDragTarget::DragController& controller,
++                                   const gfx::Point& point_in_screen) override;
++  void OnTabDragExited(const gfx::Point& point_in_screen) override;
++  void OnTabDragEnded() override;
++  bool CanDropTab() override;
++  void HandleTabDrop(TabDragTarget::DragController& controller) override;
++  base::CallbackListSubscription RegisterWillDestroyCallback(
++      base::OnceClosure callback) override;
++  std::map<views::View*, int64_t> glint_folder_row_ids_;
++  gfx::Point glint_last_drag_point_;
++  base::OnceClosureList glint_drop_target_destroy_callbacks_;
++  // Inline name editor shown while creating a folder.
++  raw_ptr<views::Textfield> glint_folder_name_field_ = nullptr;
+   int glint_active_space_ = 0;
+   std::array<std::optional<tab_groups::TabGroupId>, 3> glint_space_groups_;
+   std::array<raw_ptr<views::LabelButton>, 3> glint_space_dots_ = {};

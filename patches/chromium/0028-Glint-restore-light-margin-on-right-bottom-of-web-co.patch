@@ -1,0 +1,24 @@
+From 65ffd98ebc86e535ec155d531ca882f9e938ff11 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 13:48:43 +0200
+Subject: [PATCH 28/60] Glint: restore light margin on right + bottom of web
+ content (reference design)
+
+---
+ chrome/browser/ui/views/frame/contents_container_view.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/chrome/browser/ui/views/frame/contents_container_view.cc b/chrome/browser/ui/views/frame/contents_container_view.cc
+index b203f07a4f..be9d06d804 100644
+--- a/chrome/browser/ui/views/frame/contents_container_view.cc
++++ b/chrome/browser/ui/views/frame/contents_container_view.cc
+@@ -672,6 +672,9 @@ views::ProposedLayout ContentsContainerView::CalculateProposedLayout(
+   }
+ 
+   auto* const content_layout = layouts.GetLayoutFor(contents_view_);
++  // Glint: thin light margin on the right and bottom of the web content, like
++  // the reference design (left is the sidebar, top is the toolbar strip).
++  content_layout->bounds.Inset(gfx::Insets::TLBR(0, 0, 10, 10));
+   if (target_content_bounds_) {
+     content_layout->bounds.Outset(*target_content_bounds_);
+     contents_clip_rect_ =

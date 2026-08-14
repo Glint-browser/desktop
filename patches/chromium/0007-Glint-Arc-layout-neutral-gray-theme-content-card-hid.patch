@@ -1,0 +1,96 @@
+From ff6828cc2507f13c2468a3d40e2c730ad6b52cae Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Sun, 5 Jul 2026 20:21:33 +0200
+Subject: [PATCH 07/60] Glint Arc layout: neutral gray theme, content card,
+ hide top toolbar, airier tabs
+
+---
+ chrome/browser/themes/theme_service.cc             | 14 ++++++++------
+ chrome/browser/ui/layout_constants.cc              |  2 +-
+ chrome/browser/ui/views/frame/browser_view.cc      |  8 ++++++++
+ .../ui/views/frame/contents_container_view.cc      |  6 ++++++
+ 4 files changed, 23 insertions(+), 7 deletions(-)
+
+diff --git a/chrome/browser/themes/theme_service.cc b/chrome/browser/themes/theme_service.cc
+index 86c53c02f1..2742f09a11 100644
+--- a/chrome/browser/themes/theme_service.cc
++++ b/chrome/browser/themes/theme_service.cc
+@@ -303,9 +303,11 @@ void ThemeService::RegisterProfilePrefs(
+       prefs::kDeprecatedBrowserColorVariantDoNotUse,
+       static_cast<int>(ui::mojom::BrowserColorVariant::kSystem),
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
++  // Glint: use the Neutral color variant so the gray seed yields a clean,
++  // desaturated gray UI (like the original Glint) rather than a tinted one.
+   registry->RegisterIntegerPref(
+       prefs::kBrowserColorVariant,
+-      static_cast<int>(ui::mojom::BrowserColorVariant::kSystem));
++      static_cast<int>(ui::mojom::BrowserColorVariant::kNeutral));
+   registry->RegisterBooleanPref(
+       prefs::kDeprecatedGrayscaleThemeEnabledDoNotUse, false,
+       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+@@ -764,11 +766,11 @@ void ThemeService::SetUserColor(std::optional<SkColor> user_color) {
+ }
+ 
+ std::optional<SkColor> ThemeService::GetUserColor() const {
+-  // Glint: when the user hasn't picked a theme color, seed the whole browser
+-  // (frame, sidebar, tabs, accents) with Glint's brand purple so it looks like
+-  // Glint out of the box. Users can still override via "Customize Glint".
+-  constexpr SkColor kGlintSeedColor = SkColorSetRGB(0x6d, 0x5b, 0xd0);
+-  return CurrentThemeUserColor(profile_->GetPrefs()).value_or(kGlintSeedColor);
++  // Glint: seed a clean neutral gray (matching the original Glint's gray
++  // sidebar) when the user hasn't picked a color. Combined with the Neutral
++  // color variant this desaturates the whole UI. Users can still override.
++  constexpr SkColor kGlintNeutralSeed = SkColorSetRGB(0x8a, 0x8a, 0x8a);
++  return CurrentThemeUserColor(profile_->GetPrefs()).value_or(kGlintNeutralSeed);
+ }
+ 
+ void ThemeService::SetBrowserColorVariant(
+diff --git a/chrome/browser/ui/layout_constants.cc b/chrome/browser/ui/layout_constants.cc
+index 9caa6f8114..95dbdfc58d 100644
+--- a/chrome/browser/ui/layout_constants.cc
++++ b/chrome/browser/ui/layout_constants.cc
+@@ -146,7 +146,7 @@ int GetLayoutConstant(LayoutConstant constant) {
+     case LayoutConstant::kVerticalTabCornerRadius:
+       return 12;
+     case LayoutConstant::kVerticalTabHeight:
+-      return 30;
++      return 34;  // Glint: slightly taller, airier tabs.
+     case LayoutConstant::kVerticalTabPinnedHeight:
+       return 32;
+     case LayoutConstant::kVerticalTabMinWidth:
+diff --git a/chrome/browser/ui/views/frame/browser_view.cc b/chrome/browser/ui/views/frame/browser_view.cc
+index 2da4e711b9..9926c10c1d 100644
+--- a/chrome/browser/ui/views/frame/browser_view.cc
++++ b/chrome/browser/ui/views/frame/browser_view.cc
+@@ -2971,6 +2971,14 @@ bool BrowserView::IsToolbarVisible() const {
+   // It's possible to reach here before we've been notified of being added to a
+   // widget, so |toolbar_| is still null.  Return false in this case so callers
+   // don't assume they can access the toolbar yet.
++  //
++  // Glint: hide the top toolbar entirely for the Arc-style layout — the window
++  // becomes just [ vertical tab sidebar | content ]. Navigation lives in the
++  // sidebar / command palette. Keep the toolbar for non-normal windows (popups,
++  // apps) which rely on it.
++  if (browser_->is_type_normal() && toolbar_) {
++    return false;
++  }
+   return (browser_->SupportsWindowFeature(
+               Browser::WindowFeature::kFeatureToolbar) ||
+           browser_->SupportsWindowFeature(
+diff --git a/chrome/browser/ui/views/frame/contents_container_view.cc b/chrome/browser/ui/views/frame/contents_container_view.cc
+index b203f07a4f..5302f8f4cd 100644
+--- a/chrome/browser/ui/views/frame/contents_container_view.cc
++++ b/chrome/browser/ui/views/frame/contents_container_view.cc
+@@ -672,6 +672,12 @@ views::ProposedLayout ContentsContainerView::CalculateProposedLayout(
+   }
+ 
+   auto* const content_layout = layouts.GetLayoutFor(contents_view_);
++  // Glint: float the web content in a rounded "card" by insetting it, leaving a
++  // margin of the neutral background around it on all sides (the Arc/Glint look).
++  constexpr int kGlintContentMargin = 8;
++  content_layout->bounds.Inset(gfx::Insets::TLBR(
++      kGlintContentMargin, kGlintContentMargin, kGlintContentMargin,
++      kGlintContentMargin));
+   if (target_content_bounds_) {
+     content_layout->bounds.Outset(*target_content_bounds_);
+     contents_clip_rect_ =

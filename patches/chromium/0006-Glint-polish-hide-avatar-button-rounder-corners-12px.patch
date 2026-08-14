@@ -1,0 +1,45 @@
+From dc3fddc7b5127f5ff77b67bf3b45417b98a280e8 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Sun, 5 Jul 2026 13:21:00 +0200
+Subject: [PATCH 06/60] Glint polish: hide avatar button, rounder corners
+ (12px)
+
+---
+ chrome/browser/ui/layout_constants.cc           | 4 +++-
+ chrome/browser/ui/views/toolbar/toolbar_view.cc | 5 ++---
+ 2 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/chrome/browser/ui/layout_constants.cc b/chrome/browser/ui/layout_constants.cc
+index d89ceaf9e4..9caa6f8114 100644
+--- a/chrome/browser/ui/layout_constants.cc
++++ b/chrome/browser/ui/layout_constants.cc
+@@ -139,10 +139,12 @@ int GetLayoutConstant(LayoutConstant constant) {
+       return 20;
+     case LayoutConstant::kDownloadIconSize:
+       return 20;
++    // Glint: rounder corners on the content region, toolbar, and vertical tabs
++    // for a softer, Arc-like feel.
+     case LayoutConstant::kMainBackgroundRegionCornerRadius:
+     case LayoutConstant::kToolbarCornerRadius:
+     case LayoutConstant::kVerticalTabCornerRadius:
+-      return 8;
++      return 12;
+     case LayoutConstant::kVerticalTabHeight:
+       return 30;
+     case LayoutConstant::kVerticalTabPinnedHeight:
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+index 5a42610d05..d95eaa68af 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -581,9 +581,8 @@ void ToolbarView::Init() {
+   if (!features::IsWebUIAvatarButtonEnabled()) {
+     avatar_ =
+         AddChildView(std::make_unique<AvatarToolbarButton>(browser_view_));
+-    bool show_avatar_toolbar_button =
+-        AvatarToolbarButtonInterface::CanShowForProfile(browser_->profile());
+-    avatar_->SetVisible(show_avatar_toolbar_button);
++    // Glint: hide the profile avatar button for a cleaner, minimal toolbar.
++    avatar_->SetVisible(false);
+   }
+ 
+   overflow_button_ = AddChildView(std::make_unique<OverflowButton>());

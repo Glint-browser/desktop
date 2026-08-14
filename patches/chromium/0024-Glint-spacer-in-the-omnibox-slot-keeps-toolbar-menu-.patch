@@ -1,0 +1,33 @@
+From 3d86e681a4c77dc09ddf13753b155487e912ae13 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 09:52:42 +0200
+Subject: [PATCH 24/60] Glint: spacer in the omnibox slot keeps toolbar
+ menu/extensions right-aligned
+
+---
+ chrome/browser/ui/views/toolbar/toolbar_view.cc | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+index a37e97df37..f4239c9bad 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -1537,6 +1537,18 @@ void ToolbarView::InitLayout() {
+                                   location_bar_flex_rule);
+   }
+ 
++  // Glint: the omnibox is hidden, so an invisible spacer takes its middle
++  // slot, keeping extensions / avatar / app menu pinned to the right edge.
++  views::View* const glint_omnibox_slot =
++      location_bar_view_ ? static_cast<views::View*>(location_bar_view_)
++                         : static_cast<views::View*>(toolbar_webview_);
++  if (glint_omnibox_slot && !glint_omnibox_slot->GetVisible()) {
++    auto* glint_spacer =
++        AddChildViewAt(std::make_unique<views::View>(),
++                       GetIndexOf(glint_omnibox_slot).value() + 1);
++    glint_spacer->SetProperty(views::kFlexBehaviorKey, location_bar_flex_rule);
++  }
++
+   if (extensions_container_) {
+     const views::FlexSpecification extensions_flex_rule =
+         views::FlexSpecification(

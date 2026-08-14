@@ -1,0 +1,486 @@
+From 93de26d99ac68978e2e437c179995b210dc251f6 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Wed, 22 Jul 2026 10:04:54 +0200
+Subject: [PATCH 35/60] Glint: dynamic spaces - unlimited workspaces, Electron
+ 5-color palette, new-workspace button, per-space active-tab memory,
+ drag-tab-to-dot moves between spaces
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 300 +++++++++++++-----
+ .../frame/vertical_tab_strip_region_view.h    |  36 ++-
+ 2 files changed, 242 insertions(+), 94 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 7d2ec4b955..65c922163d 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -14,6 +14,7 @@
+ #include "base/containers/adapters.h"
+ #include "base/functional/bind.h"
+ #include "base/location.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/i18n/number_formatting.h"
+ #include "base/i18n/rtl.h"
+@@ -441,36 +442,44 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+ 
+   gemini_button_ = AddChildView(std::make_unique<views::View>());
+ 
+-  // Glint: Arc-style space indicator dots pinned to the bottom of the sidebar.
+-  // Added after the (flex-growing) bottom button container so they sit at the
+-  // very bottom edge. Decorative for now until real spaces exist.
+-  auto space_dots = std::make_unique<views::View>();
++  // Glint: bottom bar — one colored dot per workspace at the left (rebuilt
++  // dynamically as spaces are created) and a "+" new-workspace button at the
++  // right, like the reference.
++  auto bottom_bar = std::make_unique<views::View>();
++  auto* bottom_bar_box =
++      bottom_bar->SetLayoutManager(std::make_unique<views::BoxLayout>(
++          views::BoxLayout::Orientation::kHorizontal));
++  bottom_bar_box->set_cross_axis_alignment(
++      views::BoxLayout::CrossAxisAlignment::kCenter);
++  bottom_bar->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(4, region_horizontal_padding, 14,
++                        region_horizontal_padding));
++
++  auto dots_holder = std::make_unique<views::View>();
+   auto* dots_layout =
+-      space_dots->SetLayoutManager(std::make_unique<views::FlexLayout>());
++      dots_holder->SetLayoutManager(std::make_unique<views::FlexLayout>());
+   dots_layout->SetOrientation(views::LayoutOrientation::kHorizontal);
+-  // Left-aligned like the reference (dots sit at the bottom-left corner).
+   dots_layout->SetMainAxisAlignment(views::LayoutAlignment::kStart);
+   dots_layout->SetCrossAxisAlignment(views::LayoutAlignment::kCenter);
+-  space_dots->SetProperty(
+-      views::kMarginsKey,
+-      gfx::Insets::TLBR(4, region_horizontal_padding, 14,
+-                        region_horizontal_padding));
+-  // One clickable dot per space; clicking switches to that space. Styling
+-  // (active pill vs small circle, colors, tooltip) is applied afterwards by
+-  // UpdateGlintSpaceDots().
+-  for (int i = 0; i < 3; ++i) {
+-    auto dot = std::make_unique<views::LabelButton>(
+-        base::BindRepeating(&VerticalTabStripRegionView::GlintSwitchSpace,
+-                            base::Unretained(this), i));
+-    dot->SetBorder(views::CreateEmptyBorder(gfx::Insets()));
+-    dot->SetMinSize(gfx::Size(8, 8));
+-    dot->SetInstallFocusRingOnFocus(false);
+-    dot->SetProperty(views::kMarginsKey, gfx::Insets::VH(0, 3));
+-    glint_space_dots_.at(static_cast<size_t>(i)) =
+-        space_dots->AddChildView(std::move(dot));
+-  }
+-  AddChildView(std::move(space_dots));
+-  UpdateGlintSpaceDots();
++  glint_dots_holder_ = bottom_bar->AddChildView(std::move(dots_holder));
++  bottom_bar_box->SetFlexForView(glint_dots_holder_, 1);
++
++  auto add_space_button = std::make_unique<views::ImageButton>(
++      base::BindRepeating(&VerticalTabStripRegionView::GlintCreateSpace,
++                          base::Unretained(this)));
++  add_space_button->SetImageModel(
++      views::Button::STATE_NORMAL,
++      ui::ImageModel::FromVectorIcon(kAddIcon, ui::kColorIcon, 16));
++  add_space_button->SetTooltipText(u"New Workspace");
++  bottom_bar->AddChildView(std::move(add_space_button));
++
++  AddChildView(std::move(bottom_bar));
++
++  // Seed the first workspace and build its dot.
++  glint_spaces_.push_back(
++      {u"Personal", SkColorSetRGB(0x6d, 0x5b, 0xd0), std::nullopt, nullptr});
++  GlintRebuildSpaceDots();
+ 
+   resize_area_ = AddChildView(std::make_unique<views::ResizeArea>(this));
+   resize_area_->SetProperty(views::kViewIgnoredByLayoutKey, true);
+@@ -1466,41 +1475,81 @@ void VerticalTabStripRegionView::OnActiveTabChanged(
+ 
+ namespace {
+ 
+-// Glint spaces: display names, sidebar dot colors, and tab-group colors.
+-constexpr std::array<const char16_t*, 3> kGlintSpaceNames = {u"Personal",
+-                                                             u"Work", u"Play"};
+-constexpr std::array<SkColor, 3> kGlintSpaceDotColors = {
+-    kGlintAccentPurple,                // Glint's brand accent
+-    SkColorSetRGB(0x27, 0xae, 0x8f),   // teal
+-    SkColorSetRGB(0xef, 0x9a, 0x3d)};  // amber
+-constexpr std::array<tab_groups::TabGroupColorId, 3> kGlintSpaceGroupColors = {
+-    tab_groups::TabGroupColorId::kPurple, tab_groups::TabGroupColorId::kCyan,
+-    tab_groups::TabGroupColorId::kOrange};
++// Glint spaces: the Electron reference's 5-color workspace palette; spaces
++// cycle through it as they're created. Tab-group colors approximate each hue.
++constexpr std::array<SkColor, 5> kGlintSpacePalette = {
++    SkColorSetRGB(0x6d, 0x5b, 0xd0),   // purple
++    SkColorSetRGB(0xe0, 0x75, 0x9a),   // pink
++    SkColorSetRGB(0x3f, 0xb6, 0xa8),   // teal
++    SkColorSetRGB(0xe0, 0xa4, 0x58),   // amber
++    SkColorSetRGB(0x5b, 0x8d, 0xef)};  // blue
++constexpr std::array<tab_groups::TabGroupColorId, 5> kGlintSpaceGroupColors = {
++    tab_groups::TabGroupColorId::kPurple, tab_groups::TabGroupColorId::kPink,
++    tab_groups::TabGroupColorId::kGreen, tab_groups::TabGroupColorId::kOrange,
++    tab_groups::TabGroupColorId::kBlue};
++
++tab_groups::TabGroupColorId GlintGroupColorForSpace(size_t space_index) {
++  return kGlintSpaceGroupColors.at(space_index %
++                                   kGlintSpaceGroupColors.size());
++}
+ 
+ }  // namespace
+ 
+-void VerticalTabStripRegionView::UpdateGlintSpaceDots() {
+-  for (size_t i = 0; i < glint_space_dots_.size(); ++i) {
+-    views::LabelButton* dot = glint_space_dots_.at(i);
+-    if (!dot) {
+-      continue;
+-    }
++void VerticalTabStripRegionView::GlintRebuildSpaceDots() {
++  if (!glint_dots_holder_) {
++    return;
++  }
++  glint_space_dots_.clear();
++  glint_dots_holder_->RemoveAllChildViews();
++  for (size_t i = 0; i < glint_spaces_.size(); ++i) {
++    const GlintSpace& space = glint_spaces_.at(i);
+     const bool active = (static_cast<int>(i) == glint_active_space_);
+-    const SkColor color = kGlintSpaceDotColors.at(i);
++    auto dot = std::make_unique<views::LabelButton>(
++        base::BindRepeating(&VerticalTabStripRegionView::GlintSwitchSpace,
++                            base::Unretained(this), static_cast<int>(i)));
++    dot->SetBorder(views::CreateEmptyBorder(gfx::Insets()));
++    dot->SetMinSize(gfx::Size(8, 8));
++    dot->SetInstallFocusRingOnFocus(false);
++    dot->SetProperty(views::kMarginsKey, gfx::Insets::VH(0, 3));
+     dot->SetPreferredSize(active ? gfx::Size(22, 8) : gfx::Size(8, 8));
+     dot->SetBackground(views::CreateRoundedRectBackground(
+-        active ? color : SkColorSetA(color, 0x66), 4.f));
+-    dot->SetTooltipText(std::u16string(kGlintSpaceNames.at(i)));
++        active ? space.color : SkColorSetA(space.color, 0x66), 4.f));
++    dot->SetTooltipText(space.name + u" — drop a tab here to move it");
++    glint_space_dots_.push_back(
++        glint_dots_holder_->AddChildView(std::move(dot)));
+   }
+-  if (glint_workspace_name_) {
+-    glint_workspace_name_->SetText(std::u16string(
+-        kGlintSpaceNames.at(static_cast<size_t>(glint_active_space_))));
++  if (glint_workspace_name_ && glint_active_space_ >= 0 &&
++      static_cast<size_t>(glint_active_space_) < glint_spaces_.size()) {
++    glint_workspace_name_->SetText(
++        glint_spaces_.at(static_cast<size_t>(glint_active_space_)).name);
+   }
+   InvalidateLayout();
+ }
+ 
++void VerticalTabStripRegionView::GlintCreateSpace() {
++  const size_t n = glint_spaces_.size();
++  GlintSpace space;
++  space.name = u"Space " + base::NumberToString16(n + 1);
++  space.color = kGlintSpacePalette.at(n % kGlintSpacePalette.size());
++  glint_spaces_.push_back(std::move(space));
++  GlintRebuildSpaceDots();
++  // Switching to the brand-new space opens a fresh tab in it.
++  GlintSwitchSpace(static_cast<int>(n));
++}
++
++std::optional<int> VerticalTabStripRegionView::GlintSpaceIndexAtScreenPoint(
++    const gfx::Point& point_in_screen) const {
++  for (size_t i = 0; i < glint_space_dots_.size(); ++i) {
++    views::LabelButton* dot = glint_space_dots_.at(i);
++    if (dot && dot->GetBoundsInScreen().Contains(point_in_screen)) {
++      return static_cast<int>(i);
++    }
++  }
++  return std::nullopt;
++}
++
+ void VerticalTabStripRegionView::GlintAdoptOrphanTabs() {
+-  if (!glint_browser_) {
++  if (!glint_browser_ || glint_spaces_.empty()) {
+     return;
+   }
+   TabStripModel* tsm = glint_browser_->tab_strip_model();
+@@ -1517,17 +1566,17 @@ void VerticalTabStripRegionView::GlintAdoptOrphanTabs() {
+   if (orphans.empty()) {
+     return;
+   }
+-  const size_t space = static_cast<size_t>(glint_active_space_);
+-  std::optional<tab_groups::TabGroupId>& group = glint_space_groups_.at(space);
+-  if (group && group_model->ContainsTabGroup(*group)) {
+-    tsm->AddToExistingGroup(orphans, *group);
++  const size_t space_index = static_cast<size_t>(glint_active_space_);
++  GlintSpace& space = glint_spaces_.at(space_index);
++  if (space.group && group_model->ContainsTabGroup(*space.group)) {
++    tsm->AddToExistingGroup(orphans, *space.group);
+   } else {
+-    group = tsm->AddToNewGroup(orphans);
++    space.group = tsm->AddToNewGroup(orphans);
+     tsm->ChangeTabGroupVisuals(
+-        *group,
+-        tab_groups::TabGroupVisualData(
+-            std::u16string(kGlintSpaceNames.at(space)),
+-            kGlintSpaceGroupColors.at(space), /*is_collapsed=*/false),
++        *space.group,
++        tab_groups::TabGroupVisualData(space.name,
++                                       GlintGroupColorForSpace(space_index),
++                                       /*is_collapsed=*/false),
+         /*is_customized=*/true);
+   }
+ }
+@@ -1707,9 +1756,11 @@ void VerticalTabStripRegionView::BookmarkModelChanged() {
+ 
+ TabDragTarget* VerticalTabStripRegionView::GetTabDragTarget(
+     const gfx::Point& point_in_screen) {
+-  // A drag over a bookmark folder row targets Glint's drop-to-file behavior;
+-  // anywhere else falls through to the stock tab-strip drag handling.
+-  if (GlintFolderIdAtScreenPoint(point_in_screen).has_value()) {
++  // A drag over a bookmark folder row (drop-to-file) or a space dot
++  // (drop-to-move-to-space) targets Glint's behavior; anywhere else falls
++  // through to the stock tab-strip drag handling.
++  if (GlintFolderIdAtScreenPoint(point_in_screen).has_value() ||
++      GlintSpaceIndexAtScreenPoint(point_in_screen).has_value()) {
+     glint_last_drag_point_ = point_in_screen;
+     return this;
+   }
+@@ -1746,16 +1797,75 @@ void VerticalTabStripRegionView::OnTabDragExited(
+ void VerticalTabStripRegionView::OnTabDragEnded() {}
+ 
+ bool VerticalTabStripRegionView::CanDropTab() {
+-  return GlintFolderIdAtScreenPoint(glint_last_drag_point_).has_value();
++  return GlintFolderIdAtScreenPoint(glint_last_drag_point_).has_value() ||
++         GlintSpaceIndexAtScreenPoint(glint_last_drag_point_).has_value();
+ }
+ 
+ void VerticalTabStripRegionView::HandleTabDrop(
+     TabDragTarget::DragController& controller) {
+-  const std::optional<int64_t> folder_id =
+-      GlintFolderIdAtScreenPoint(glint_last_drag_point_);
+   content::WebContents* contents =
+       controller.GetSessionData().source_dragged_contents();
+-  if (!folder_id || !contents || !glint_browser_) {
++  if (!contents || !glint_browser_) {
++    return;
++  }
++
++  // Dropped on a space dot: move the tab into that space's group (Electron
++  // parity: drag a tab to a dot to move it between workspaces).
++  if (const std::optional<int> space_index =
++          GlintSpaceIndexAtScreenPoint(glint_last_drag_point_)) {
++    TabStripModel* tsm = glint_browser_->tab_strip_model();
++    TabGroupModel* group_model = tsm->group_model();
++    const int tab_index = tsm->GetIndexOfWebContents(contents);
++    if (!group_model || tab_index < 0 ||
++        static_cast<size_t>(*space_index) >= glint_spaces_.size() ||
++        *space_index == glint_active_space_) {
++      return;
++    }
++    const bool was_active = (tab_index == tsm->active_index());
++    GlintSpace& target = glint_spaces_.at(static_cast<size_t>(*space_index));
++    if (target.group && group_model->ContainsTabGroup(*target.group)) {
++      tsm->AddToExistingGroup({tab_index}, *target.group);
++    } else {
++      target.group = tsm->AddToNewGroup({tab_index});
++      tsm->ChangeTabGroupVisuals(
++          *target.group,
++          tab_groups::TabGroupVisualData(
++              target.name,
++              GlintGroupColorForSpace(static_cast<size_t>(*space_index)),
++              /*is_collapsed=*/true),
++          /*is_customized=*/true);
++    }
++    target.last_active = contents->GetWeakPtr();
++    // If the moved tab was the active one, hand focus back to the current
++    // space so its (collapsed) new home doesn't hold the active tab.
++    if (was_active) {
++      GlintSpace& current =
++          glint_spaces_.at(static_cast<size_t>(glint_active_space_));
++      if (current.group && group_model->ContainsTabGroup(*current.group)) {
++        const gfx::Range tabs =
++            group_model->GetTabGroup(*current.group)->ListTabs();
++        if (!tabs.is_empty()) {
++          tsm->ActivateTabAt(static_cast<int>(tabs.start()));
++        }
++      }
++    }
++    // Re-assert the target's collapsed state (joining a collapsed group with
++    // the active tab can auto-expand it).
++    if (target.group && group_model->ContainsTabGroup(*target.group)) {
++      tsm->ChangeTabGroupVisuals(
++          *target.group,
++          tab_groups::TabGroupVisualData(
++              target.name,
++              GlintGroupColorForSpace(static_cast<size_t>(*space_index)),
++              /*is_collapsed=*/true),
++          /*is_customized=*/true);
++    }
++    return;
++  }
++
++  const std::optional<int64_t> folder_id =
++      GlintFolderIdAtScreenPoint(glint_last_drag_point_);
++  if (!folder_id) {
+     return;
+   }
+   bookmarks::BookmarkModel* model =
+@@ -1808,7 +1918,9 @@ void VerticalTabStripRegionView::GlintHandleNewTab() {
+ }
+ 
+ void VerticalTabStripRegionView::GlintSwitchSpace(int space_index) {
+-  if (!glint_browser_ || space_index == glint_active_space_) {
++  if (!glint_browser_ || space_index == glint_active_space_ ||
++      space_index < 0 ||
++      static_cast<size_t>(space_index) >= glint_spaces_.size()) {
+     return;
+   }
+   TabStripModel* tsm = glint_browser_->tab_strip_model();
+@@ -1817,26 +1929,43 @@ void VerticalTabStripRegionView::GlintSwitchSpace(int space_index) {
+     return;
+   }
+   // Stored groups vanish when their last tab closes; drop stale ids.
+-  for (auto& group : glint_space_groups_) {
+-    if (group && !group_model->ContainsTabGroup(*group)) {
+-      group.reset();
++  for (GlintSpace& space : glint_spaces_) {
++    if (space.group && !group_model->ContainsTabGroup(*space.group)) {
++      space.group.reset();
+     }
+   }
+   // The outgoing space adopts any ungrouped tabs so they stay together (and
+-  // collapse away) once we leave it.
++  // collapse away) once we leave it, and remembers its active tab so we can
++  // restore it on return (Electron parity: per-space active-tab memory).
+   GlintAdoptOrphanTabs();
++  {
++    GlintSpace& outgoing =
++        glint_spaces_.at(static_cast<size_t>(glint_active_space_));
++    content::WebContents* current = tsm->GetActiveWebContents();
++    outgoing.last_active = current ? current->GetWeakPtr() : nullptr;
++  }
+ 
+   glint_active_space_ = space_index;
+-  UpdateGlintSpaceDots();
++  GlintRebuildSpaceDots();
+ 
+   const size_t new_space = static_cast<size_t>(space_index);
+-  std::optional<tab_groups::TabGroupId> target =
+-      glint_space_groups_.at(new_space);
+-  if (target) {
+-    // Returning to a space: activate the first tab of its group.
+-    const gfx::Range tabs = group_model->GetTabGroup(*target)->ListTabs();
+-    if (!tabs.is_empty()) {
+-      tsm->ActivateTabAt(static_cast<int>(tabs.start()));
++  GlintSpace& target_space = glint_spaces_.at(new_space);
++  if (target_space.group) {
++    // Returning to a space: prefer its remembered active tab (if it still
++    // exists and still belongs to this space's group), else the first tab.
++    const gfx::Range tabs =
++        group_model->GetTabGroup(*target_space.group)->ListTabs();
++    int activate_index =
++        tabs.is_empty() ? -1 : static_cast<int>(tabs.start());
++    if (content::WebContents* remembered = target_space.last_active.get()) {
++      const int remembered_index = tsm->GetIndexOfWebContents(remembered);
++      if (remembered_index >= 0 &&
++          tsm->GetTabGroupForTab(remembered_index) == target_space.group) {
++        activate_index = remembered_index;
++      }
++    }
++    if (activate_index >= 0) {
++      tsm->ActivateTabAt(activate_index);
+     }
+   } else {
+     // First visit: open a fresh tab and group it under this space.
+@@ -1845,20 +1974,17 @@ void VerticalTabStripRegionView::GlintSwitchSpace(int space_index) {
+     if (new_index < 0) {
+       return;
+     }
+-    target = tsm->AddToNewGroup({new_index});
+-    glint_space_groups_.at(new_space) = target;
++    target_space.group = tsm->AddToNewGroup({new_index});
+   }
+   // Expand the target space's group; collapse the other spaces'.
+-  for (size_t i = 0; i < glint_space_groups_.size(); ++i) {
+-    const std::optional<tab_groups::TabGroupId>& group_id =
+-        glint_space_groups_.at(i);
+-    if (!group_id || !group_model->ContainsTabGroup(*group_id)) {
++  for (size_t i = 0; i < glint_spaces_.size(); ++i) {
++    const GlintSpace& space = glint_spaces_.at(i);
++    if (!space.group || !group_model->ContainsTabGroup(*space.group)) {
+       continue;
+     }
+     tsm->ChangeTabGroupVisuals(
+-        *group_id,
+-        tab_groups::TabGroupVisualData(std::u16string(kGlintSpaceNames.at(i)),
+-                                       kGlintSpaceGroupColors.at(i),
++        *space.group,
++        tab_groups::TabGroupVisualData(space.name, GlintGroupColorForSpace(i),
+                                        /*is_collapsed=*/i != new_space),
+         /*is_customized=*/true);
+   }
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index f971eca4ac..416e08d95c 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -15,6 +15,7 @@
+ #include "chrome/browser/ui/views/tabs/dragging/tab_drag_target.h"
+ #include "components/bookmarks/browser/base_bookmark_model_observer.h"
+ #include "components/tab_groups/tab_group_id.h"
++#include "third_party/skia/include/core/SkColor.h"
+ #include "url/gurl.h"
+ 
+ #include "base/callback_list.h"
+@@ -55,6 +56,10 @@ namespace bookmarks {
+ class BookmarkModel;
+ class BookmarkNode;
+ }  // namespace bookmarks
++
++namespace content {
++class WebContents;
++}  // namespace content
+ class VerticalTabStripBottomContainer;
+ class ShadowFrameView;
+ 
+@@ -307,12 +312,17 @@ class VerticalTabStripRegionView final
+   // Copy the active tab's URL to the clipboard (address bar copy button).
+   void GlintCopyUrl();
+ 
+-  // Glint spaces: each space's tabs live in a dedicated tab group (created on
+-  // demand). Clicking a dot switches spaces: the target group expands and is
+-  // activated, the others collapse away.
++  // Glint spaces: dynamic workspaces. Each space's tabs live in a dedicated
++  // tab group (created on demand); clicking a dot switches spaces (the target
++  // group expands, the others collapse away); the "+" in the bottom bar
++  // creates a new space; dropping a dragged tab on a dot moves it there.
+   void GlintSwitchSpace(int space_index);
+-  // Restyle the dots (active pill vs small circles) + sync the space name.
+-  void UpdateGlintSpaceDots();
++  void GlintCreateSpace();
++  // Rebuild the dot row from the space list + sync the space-name label.
++  void GlintRebuildSpaceDots();
++  // Screen-point → space index, if a dot is under it.
++  std::optional<int> GlintSpaceIndexAtScreenPoint(
++      const gfx::Point& point_in_screen) const;
+   // Fold any ungrouped, unpinned tabs into the active space's group.
+   void GlintAdoptOrphanTabs();
+   // Runs after a tab is inserted: adopts it into the active space and focuses
+@@ -364,9 +374,21 @@ class VerticalTabStripRegionView final
+   base::OnceClosureList glint_drop_target_destroy_callbacks_;
+   // Inline name editor shown while creating a folder.
+   raw_ptr<views::Textfield> glint_folder_name_field_ = nullptr;
++  // One entry per workspace (Electron parity: dynamic, colored, unlimited).
++  struct GlintSpace {
++    std::u16string name;
++    SkColor color = 0;
++    std::optional<tab_groups::TabGroupId> group;
++    // The tab to reactivate when returning to this space.
++    base::WeakPtr<content::WebContents> last_active;
++  };
+   int glint_active_space_ = 0;
+-  std::array<std::optional<tab_groups::TabGroupId>, 3> glint_space_groups_;
+-  std::array<raw_ptr<views::LabelButton>, 3> glint_space_dots_ = {};
++  std::vector<GlintSpace> glint_spaces_;
++  // Plain pointers (like glint_folder_row_ids_): the views are owned by
++  // glint_dots_holder_ and the vector is rebuilt whenever they change.
++  std::vector<views::LabelButton*> glint_space_dots_;
++  // Container holding only the dot buttons (rebuilt on space changes).
++  raw_ptr<views::View> glint_dots_holder_ = nullptr;
+ 
+   // TabStripModelObserver: keep the sidebar address bar showing the active URL.
+   void OnTabStripModelChanged(

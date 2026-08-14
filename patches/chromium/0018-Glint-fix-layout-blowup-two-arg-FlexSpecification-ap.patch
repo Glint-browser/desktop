@@ -1,0 +1,73 @@
+From 6d89a7d1027f1017533ba5c43f409acd7eae25fc Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Mon, 6 Jul 2026 21:32:31 +0200
+Subject: [PATCH 18/60] Glint: fix layout blowup - two-arg FlexSpecification
+ applies to both axes; use BoxLayout row + oriented spacer
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 28 +++++++++----------
+ 1 file changed, 14 insertions(+), 14 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 1419c849e8..cda72804aa 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -307,12 +307,14 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   glint_pin_hint_ = AddChildView(std::move(pin_hint));
+ 
+   // Glint: workspace header row — bold space name with a "+" button pushed to
+-  // the right edge (like the "Work" row in the reference).
++  // the right edge (like the "Work" row in the reference). BoxLayout with the
++  // label flexed keeps the row at its natural height.
+   auto workspace_row = std::make_unique<views::View>();
+-  auto* workspace_row_layout =
+-      workspace_row->SetLayoutManager(std::make_unique<views::FlexLayout>());
+-  workspace_row_layout->SetOrientation(views::LayoutOrientation::kHorizontal);
+-  workspace_row_layout->SetCrossAxisAlignment(views::LayoutAlignment::kCenter);
++  auto* workspace_box =
++      workspace_row->SetLayoutManager(std::make_unique<views::BoxLayout>(
++          views::BoxLayout::Orientation::kHorizontal));
++  workspace_box->set_cross_axis_alignment(
++      views::BoxLayout::CrossAxisAlignment::kCenter);
+   workspace_row->SetProperty(
+       views::kMarginsKey,
+       gfx::Insets::TLBR(2, region_horizontal_padding + 4, 0,
+@@ -323,14 +325,6 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   workspace_name->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+   glint_workspace_name_ = workspace_row->AddChildView(std::move(workspace_name));
+ 
+-  // Flexible spacer pushes the button to the row's right edge.
+-  auto* header_spacer =
+-      workspace_row->AddChildView(std::make_unique<views::View>());
+-  header_spacer->SetProperty(
+-      views::kFlexBehaviorKey,
+-      views::FlexSpecification(views::MinimumFlexSizeRule::kScaleToZero,
+-                               views::MaximumFlexSizeRule::kUnbounded));
+-
+   auto new_folder_button = std::make_unique<views::ImageButton>(
+       base::BindRepeating(&VerticalTabStripRegionView::GlintNewTab,
+                           base::Unretained(this)));
+@@ -340,6 +334,9 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   new_folder_button->SetTooltipText(u"New tab");
+   workspace_row->AddChildView(std::move(new_folder_button));
+ 
++  // The label takes the remaining width, pushing the button to the right.
++  workspace_box->SetFlexForView(glint_workspace_name_, 1);
++
+   AddChildView(std::move(workspace_row));
+ 
+   // Glint: bookmarks folder row (matches the reference sidebar). Opens the
+@@ -418,9 +415,12 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   // strip view is later reordered to sit right after the separator, i.e.
+   // above this spacer.
+   auto* glint_bottom_spacer = AddChildView(std::make_unique<views::View>());
++  // NOTE: must use the orientation-specific FlexSpecification — the two-arg
++  // form applies to BOTH axes and blows up the layout.
+   glint_bottom_spacer->SetProperty(
+       views::kFlexBehaviorKey,
+-      views::FlexSpecification(views::MinimumFlexSizeRule::kScaleToZero,
++      views::FlexSpecification(views::LayoutOrientation::kVertical,
++                               views::MinimumFlexSizeRule::kScaleToZero,
+                                views::MaximumFlexSizeRule::kUnbounded));
+ 
+   bottom_button_container_ =

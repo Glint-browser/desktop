@@ -1,0 +1,1228 @@
+From 4eba85170fcfee5a5d3de34463acb6fec96865a1 Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Wed, 12 Aug 2026 09:33:21 +0200
+Subject: [PATCH 40/60] Glint: native command palette, Glint settings window,
+ glint:// bridge, workspaces, profiles
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- ⌘T command palette (chrome/browser/ui/views/glint/): tab + history search,
+  URL-or-default-search-engine open, /profile command with suggestions,
+  Electron styling, Spotlight placement; works in tabless windows
+- ⌘, opens the Glint settings page (extension) as a trusted app popup and
+  passes the Glint profile list; app-menu Settings rerouted
+- glint:// protocol bridge: palette, set-theme (BrowserColorScheme),
+  set-search (TemplateURLService), set-adblock, adblock-settings
+- ⌥⌘←/→ switch workspaces (adjacent tab group, wrap, most-recent tab)
+- /profile <name> <url>: real on-disk glint-<name> profiles opened as tabs
+  in the current window and tab group; tabId->profile-name pushed into the
+  Glint UI extension's storage for sidebar badges
+---
+ chrome/app/chrome_command_ids.h               |   4 +
+ .../browser/chrome_content_browser_client.cc  |  46 +
+ .../browser/global_keyboard_shortcuts_mac.mm  |   6 +-
+ chrome/browser/ui/BUILD.gn                    |   4 +
+ .../browser/ui/browser_command_controller.cc  |  29 +-
+ chrome/browser/ui/tab_helpers.h               |  10 +
+ .../ui/views/glint/glint_command_palette.cc   | 801 ++++++++++++++++++
+ .../ui/views/glint/glint_command_palette.h    |  59 ++
+ .../browser/ui/views/glint/glint_glass_mac.h  |  28 +
+ .../browser/ui/views/glint/glint_glass_mac.mm |  70 ++
+ 10 files changed, 1053 insertions(+), 4 deletions(-)
+ create mode 100644 chrome/browser/ui/views/glint/glint_command_palette.cc
+ create mode 100644 chrome/browser/ui/views/glint/glint_command_palette.h
+ create mode 100644 chrome/browser/ui/views/glint/glint_glass_mac.h
+ create mode 100644 chrome/browser/ui/views/glint/glint_glass_mac.mm
+
+diff --git a/chrome/app/chrome_command_ids.h b/chrome/app/chrome_command_ids.h
+index b71eb7fecd..e9b0c97ff1 100644
+--- a/chrome/app/chrome_command_ids.h
++++ b/chrome/app/chrome_command_ids.h
+@@ -634,6 +634,10 @@
+ #define IDC_OMNIBOX_CONTEXT_SET_MODEL_PRO_NO_GEN_UI           54018
+ #define IDC_OMNIBOX_CONTEXT_SHARED_TABS_SUBMENU               54019
+ 
++// Glint: workspace switching (⌥⌘←/→, Arc-style)
++#define IDC_GLINT_WORKSPACE_PREV                              54100
++#define IDC_GLINT_WORKSPACE_NEXT                              54101
++
+ // NOTE: The last valid command value is 57343 (0xDFFF)
+ // See http://msdn.microsoft.com/en-us/library/t2zechd4(VS.71).aspx
+ 
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index ee1657fe1e..571d9018b7 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -563,6 +563,8 @@
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/themes/theme_service_factory.h"
+ #include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
++#include "chrome/browser/ui/views/glint/glint_command_palette.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+ #include "chrome/browser/ui/chrome_pages.h"
+@@ -7291,6 +7293,50 @@ bool ChromeContentBrowserClient::HandleExternalProtocol(
+     mojo::PendingRemote<network::mojom::URLLoaderFactory>* out_factory) {
+   CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+ 
++  // Glint: glint://palette opens the native command palette. Used by the
++  // Glint sidebar (a side-panel extension) to trigger browser UI it cannot
++  // reach through extension APIs. Never handed to the OS.
++  if (url.SchemeIs("glint")) {
++    const std::string glint_spec = url.possibly_invalid_spec();
++    content::WebContents* glint_wc = web_contents_getter.Run();
++    Profile* glint_profile =
++        glint_wc ? Profile::FromBrowserContext(glint_wc->GetBrowserContext())
++                 : nullptr;
++    if (glint_profile) {
++      constexpr char kThemePrefix[] = "glint://set-theme/";
++      constexpr char kSearchPrefix[] = "glint://set-search/";
++      if (base::StartsWith(glint_spec, "glint://palette")) {
++        auto* glint_collection =
++            ProfileBrowserCollection::GetForProfile(glint_profile);
++        BrowserWindowInterface* glint_bwi =
++            glint_collection ? glint_collection->GetLastActiveBrowser()
++                             : nullptr;
++        if (glint_bwi) {
++          glint::ShowCommandPalette(glint_bwi->GetBrowserForMigrationOnly());
++        }
++      } else if (base::StartsWith(glint_spec, kThemePrefix)) {
++        glint::ApplyThemeSetting(glint_profile,
++                                 glint_spec.substr(strlen(kThemePrefix)));
++      } else if (base::StartsWith(glint_spec, kSearchPrefix)) {
++        glint::ApplySearchEngineSetting(
++            glint_profile, glint_spec.substr(strlen(kSearchPrefix)));
++      } else if (base::StartsWith(glint_spec, "glint://set-adblock/")) {
++        glint::ApplyAdblockSetting(
++            glint_profile, glint_spec.substr(strlen("glint://set-adblock/")));
++      } else if (base::StartsWith(glint_spec, "glint://adblock-settings")) {
++        auto* glint_collection =
++            ProfileBrowserCollection::GetForProfile(glint_profile);
++        BrowserWindowInterface* glint_bwi =
++            glint_collection ? glint_collection->GetLastActiveBrowser()
++                             : nullptr;
++        if (glint_bwi) {
++          glint::OpenAdblockSettings(glint_bwi->GetBrowserForMigrationOnly());
++        }
++      }
++    }
++    return true;
++  }
++
+ #if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || \
+     BUILDFLAG(IS_WIN)
+   // Handle the google-chrome:// scheme (and chromium://).
+diff --git a/chrome/browser/global_keyboard_shortcuts_mac.mm b/chrome/browser/global_keyboard_shortcuts_mac.mm
+index bc8c1e5d95..4ac472d9de 100644
+--- a/chrome/browser/global_keyboard_shortcuts_mac.mm
++++ b/chrome/browser/global_keyboard_shortcuts_mac.mm
+@@ -118,8 +118,10 @@ CommandForKeyEventResult ShortcutCommand(int cmd) {
+       {true,  true,  false, false, kVK_ANSI_LeftBracket,  IDC_SELECT_PREVIOUS_TAB},
+       {false, false, true,  false, kVK_PageDown,          IDC_SELECT_NEXT_TAB},
+       {false, false, true,  false, kVK_PageUp,            IDC_SELECT_PREVIOUS_TAB},
+-      {true,  false, false, true,  kVK_RightArrow,        IDC_SELECT_NEXT_TAB},
+-      {true,  false, false, true,  kVK_LeftArrow,         IDC_SELECT_PREVIOUS_TAB},
++      // Glint: ⌥⌘←/→ switches workspaces (Arc-style). Tab cycling keeps
++      // ⌃Tab / ⌘⇧[ ] / ⌘1..8.
++      {true,  false, false, true,  kVK_RightArrow,        IDC_GLINT_WORKSPACE_NEXT},
++      {true,  false, false, true,  kVK_LeftArrow,         IDC_GLINT_WORKSPACE_PREV},
+       {false, true,  true,  false, kVK_PageDown,          IDC_MOVE_TAB_NEXT},
+       {false, true,  true,  false, kVK_PageUp,            IDC_MOVE_TAB_PREVIOUS},
+ 
+diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
+index 75b6c2af76..589cf2348c 100644
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -3561,6 +3561,8 @@ static_library("ui") {
+       "views/frame/browser_native_widget_mac.mm",
+       "views/frame/glass_frame_service.cc",
+       "views/frame/glass_frame_service.h",
++      "views/glint/glint_glass_mac.h",
++      "views/glint/glint_glass_mac.mm",
+       "views/frame/immersive_mode_controller_mac.h",
+       "views/frame/immersive_mode_controller_mac.mm",
+       "views/frame/immersive_mode_overlay_views_mac.h",
+@@ -4139,6 +4141,8 @@ static_library("ui") {
+       "views/frame/web_contents_close_handler_delegate.h",
+       "views/fullscreen_control/fullscreen_control_host.cc",
+       "views/fullscreen_control/fullscreen_control_host.h",
++      "views/glint/glint_command_palette.cc",
++      "views/glint/glint_command_palette.h",
+       "views/global_error_bubble_view.cc",
+       "views/global_error_bubble_view.h",
+       "views/hung_renderer_view.cc",
+diff --git a/chrome/browser/ui/browser_command_controller.cc b/chrome/browser/ui/browser_command_controller.cc
+index 5e59394e73..38a9beba7b 100644
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -58,6 +58,7 @@
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_actions.h"
+ #include "chrome/browser/ui/browser_commands.h"
++#include "chrome/browser/ui/views/glint/glint_command_palette.h"
+ #include "chrome/browser/ui/browser_element_identifiers.h"
+ #include "chrome/browser/ui/browser_select_file_dialog_controller.h"
+ #include "chrome/browser/ui/browser_window.h"
+@@ -626,6 +627,13 @@ bool BrowserCommandController::ExecuteCommandWithDisposition(
+   // crashes, e.g. from Windows sending WM_COMMANDs at random times during
+   // window construction.  This probably could use closer examination someday.
+   if (browser_->tab_strip_model()->active_index() == TabStripModel::kNoTab) {
++    // Glint: with a tabless window (all tabs closed, blank workspace) these
++    // commands must still fire — they are how the user gets back into a tab.
++    if (id == IDC_NEW_TAB || id == IDC_OPTIONS ||
++        id == IDC_GLINT_WORKSPACE_PREV || id == IDC_GLINT_WORKSPACE_NEXT) {
++      return command_updater_->ExecuteCommandWithDisposition(id, disposition,
++                                                             time_stamp);
++    }
+     return true;
+   }
+ 
+@@ -706,9 +714,20 @@ void BrowserCommandController::HandleCommandWithDisposition(
+       CloseWindow(browser_);
+       break;
+     case IDC_NEW_TAB: {
+-      NewTab(browser_, NewTabTypes::kNewTabCommand);
++      // Glint: ⌘T opens the command palette (Arc-style). Its default row
++      // still creates a plain new tab, so an empty query + Enter behaves
++      // exactly like stock ⌘T.
++      glint::ShowCommandPalette(browser_);
+       break;
+     }
++    case IDC_GLINT_WORKSPACE_PREV:
++      // Glint: ⌥⌘← previous workspace; the sidebar registry follows via the
++      // extension's onActivated listener.
++      glint::ActivateAdjacentWorkspace(browser_, -1);
++      break;
++    case IDC_GLINT_WORKSPACE_NEXT:
++      glint::ActivateAdjacentWorkspace(browser_, 1);
++      break;
+     case IDC_NEW_TAB_TO_RIGHT: {
+       NewTabToRight(browser_);
+       break;
+@@ -1229,7 +1248,10 @@ void BrowserCommandController::HandleCommandWithDisposition(
+                           chrome::kPerformanceSubPage);
+       break;
+     case IDC_OPTIONS:
+-      ShowSettings(browser_->GetBrowserForOpeningWebUi());
++      // Glint: the app-menu Settings entry opens the Glint settings popup
++      // (native settings remain reachable from inside it).
++      glint::OpenGlintSettings(
++          browser_->GetBrowserForOpeningWebUi()->GetBrowserForMigrationOnly());
+       break;
+     case IDC_EDIT_SEARCH_ENGINES:
+       ShowSearchEngineSettings(browser_->GetBrowserForOpeningWebUi());
+@@ -1915,6 +1937,9 @@ void BrowserCommandController::InitCommandState() {
+   command_updater_->UpdateCommandEnabled(IDC_SELECT_TAB_7, supports_tabs);
+   command_updater_->UpdateCommandEnabled(IDC_SELECT_LAST_TAB, supports_tabs);
+   command_updater_->UpdateCommandEnabled(IDC_NEW_TAB_TO_RIGHT, supports_tabs);
++  // Glint: workspace shortcuts always available.
++  command_updater_->UpdateCommandEnabled(IDC_GLINT_WORKSPACE_PREV, true);
++  command_updater_->UpdateCommandEnabled(IDC_GLINT_WORKSPACE_NEXT, true);
+ 
+   // These are always enabled; the menu determines their menu item visibility.
+   command_updater_->UpdateCommandEnabled(IDC_UPGRADE_DIALOG, true);
+diff --git a/chrome/browser/ui/tab_helpers.h b/chrome/browser/ui/tab_helpers.h
+index ec26ac19c0..6e7cb2988c 100644
+--- a/chrome/browser/ui/tab_helpers.h
++++ b/chrome/browser/ui/tab_helpers.h
+@@ -89,6 +89,16 @@ class TabHelpers {
+   // serve in that role. It is safe to call this on a WebContents that was
+   // already adopted.
+   static void AttachTabHelpers(content::WebContents* web_contents);
++
++ public:
++  // Glint: profile tabs (isolated named sessions opened into a foreign
++  // window's tab strip) are created outside the normal tab-creation paths
++  // and need the full helper set attached explicitly.
++  static void AttachTabHelpersForGlint(content::WebContents* web_contents) {
++    AttachTabHelpers(web_contents);
++  }
++
++ private:
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_TAB_HELPERS_H_
+diff --git a/chrome/browser/ui/views/glint/glint_command_palette.cc b/chrome/browser/ui/views/glint/glint_command_palette.cc
+new file mode 100644
+index 0000000000..5ffd2dd1fc
+--- /dev/null
++++ b/chrome/browser/ui/views/glint/glint_command_palette.cc
+@@ -0,0 +1,801 @@
++// Copyright 2026 The Glint Authors.
++// Use of this source code is governed by a BSD-style license.
++
++#include "chrome/browser/ui/views/glint/glint_command_palette.h"
++
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/functional/bind.h"
++#include "base/i18n/case_conversion.h"
++#include "base/memory/raw_ptr.h"
++#include "base/strings/escape.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/cancelable_task_tracker.h"
++#include "chrome/browser/favicon/favicon_utils.h"
++#include "chrome/browser/history/history_service_factory.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_commands.h"
++#include "chrome/browser/ui/navigator/browser_navigator.h"
++#include "chrome/browser/ui/chrome_pages.h"
++#include "chrome/browser/extensions/component_loader.h"
++#include "components/prefs/pref_service.h"
++#include "chrome/browser/search_engines/template_url_service_factory.h"
++#include "chrome/browser/themes/theme_service.h"
++#include "chrome/browser/themes/theme_service_factory.h"
++#include "components/search_engines/template_url.h"
++#include "components/search_engines/template_url_service.h"
++#include "extensions/browser/extension_registry.h"
++#include "extensions/common/extension.h"
++#include "chrome/browser/ui/navigator/browser_navigator_params.h"
++#include "chrome/browser/ui/tabs/tab_enums.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include <algorithm>
++#include "components/tab_groups/tab_group_id.h"
++#include "build/build_config.h"
++#include "chrome/browser/ui/views/frame/browser_view.h"
++#include "base/no_destructor.h"
++#include "chrome/browser/extensions/extension_util.h"
++#include "extensions/browser/extension_util.h"
++#include "chrome/browser/ui/tab_helpers.h"
++#include "base/strings/string_number_conversions.h"
++#include "components/sessions/content/session_tab_helper.h"
++#include "extensions/browser/api/storage/storage_frontend.h"
++#include "extensions/common/api/storage.h"
++#include "chrome/browser/browser_process.h"
++#include "chrome/browser/profiles/profile_manager.h"
++#include "chrome/browser/profiles/profile_attributes_entry.h"
++#include "chrome/browser/profiles/profile_attributes_storage.h"
++#include "content/public/browser/navigation_controller.h"
++#include "chrome/browser/ui/views/location_bar/location_bar_bubble_delegate_view.h"
++#include "ui/native_theme/native_theme.h"
++#include "components/history/core/browser/history_service.h"
++#include "components/history/core/browser/history_types.h"
++#include "components/url_formatter/url_fixer.h"
++#include "components/vector_icons/vector_icons.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/models/image_model.h"
++#include "ui/base/mojom/dialog_button.mojom.h"
++#include "ui/base/page_transition_types.h"
++#include "ui/base/window_open_disposition.h"
++#include "ui/color/color_id.h"
++#include "ui/events/keycodes/keyboard_codes.h"
++#include "ui/gfx/font_list.h"
++#include "ui/gfx/geometry/insets.h"
++#include "ui/views/accessibility/view_accessibility.h"
++#include "ui/views/background.h"
++#include "ui/views/bubble/bubble_border.h"
++#include "ui/views/bubble/bubble_dialog_delegate_view.h"
++#include "ui/views/bubble/bubble_frame_view.h"
++#include "ui/views/window/non_client_view.h"
++#include "ui/views/controls/button/button.h"
++#include "ui/views/controls/image_view.h"
++#include "ui/views/controls/label.h"
++#include "ui/views/controls/separator.h"
++#include "ui/views/style/typography.h"
++#include "ui/views/view_class_properties.h"
++#include "ui/views/controls/textfield/textfield.h"
++#include "ui/views/controls/textfield/textfield_controller.h"
++#include "ui/views/layout/box_layout.h"
++#include "url/gurl.h"
++
++namespace glint {
++
++namespace {
++
++constexpr int kPaletteWidth = 640;
++constexpr int kInputHeight = 56;
++constexpr int kRowHeight = 40;
++constexpr int kCornerRadius = 14;
++constexpr int kRowCornerRadius = 10;
++constexpr int kIconSize = 16;
++
++// The Electron Glint palette colors, copied verbatim from styles.css:
++// --panel-strong over the gray ground, --text, --text-dim, --hover.
++constexpr SkColor kGlintPanel = SkColorSetRGB(0xF5, 0xF4, 0xF8);
++constexpr SkColor kGlintText = SkColorSetRGB(0x2B, 0x27, 0x33);
++constexpr SkColor kGlintTextDim = SkColorSetRGB(0x6B, 0x66, 0x75);
++constexpr SkColor kGlintHover = SkColorSetA(SK_ColorBLACK, 0x0D);
++constexpr size_t kMaxTabRows = 8;
++constexpr size_t kMaxHistoryRows = 8;
++
++// URL-or-search heuristic, mirroring the Glint Electron shell. Searches go
++// through the browser's real default search engine.
++GURL ToNavigableUrl(Browser* browser, const std::u16string& query) {
++  const std::string text = base::UTF16ToUTF8(query);
++  const bool looks_like_url =
++      text.find(' ') == std::string::npos && text.find('.') != std::string::npos;
++  if (looks_like_url) {
++    GURL fixed = url_formatter::FixupURL(text, std::string());
++    if (fixed.is_valid()) {
++      return fixed;
++    }
++  }
++  TemplateURLService* turl_service =
++      TemplateURLServiceFactory::GetForProfile(browser->profile());
++  if (turl_service) {
++    const TemplateURL* engine = turl_service->GetDefaultSearchProvider();
++    if (engine) {
++      GURL search(engine->url_ref().ReplaceSearchTerms(
++          TemplateURLRef::SearchTermsArgs(query),
++          turl_service->search_terms_data()));
++      if (search.is_valid()) {
++        return search;
++      }
++    }
++  }
++  return GURL("https://www.google.com/search?q=" +
++              base::EscapeQueryParamValue(text, /*use_plus=*/true));
++}
++
++// One result row: [icon] [title, elided] ............ [meta, secondary].
++class PaletteRow : public views::Button {
++  METADATA_HEADER(PaletteRow, views::Button)
++
++ public:
++  PaletteRow(PressedCallback callback,
++             const ui::ImageModel& icon,
++             const std::u16string& label,
++             const std::u16string& meta,
++             bool selected)
++      : views::Button(std::move(callback)) {
++    auto* layout = SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kHorizontal,
++        gfx::Insets::TLBR(0, 14, 0, 14), 12));
++    layout->set_cross_axis_alignment(
++        views::BoxLayout::CrossAxisAlignment::kCenter);
++
++    auto* icon_view = AddChildView(std::make_unique<views::ImageView>());
++    icon_view->SetImage(icon);
++    icon_view->SetImageSize(gfx::Size(kIconSize, kIconSize));
++
++    auto* title = AddChildView(std::make_unique<views::Label>(label));
++    title->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    title->SetElideBehavior(gfx::ELIDE_TAIL);
++    title->SetEnabledColor(kGlintText);
++    layout->SetFlexForView(title, 1);
++
++    auto* meta_label = AddChildView(std::make_unique<views::Label>(
++        meta, views::style::CONTEXT_LABEL, views::style::STYLE_SECONDARY));
++    meta_label->SetEnabledColor(kGlintTextDim);
++
++    SetPreferredSize(gfx::Size(kPaletteWidth - 16, kRowHeight));
++    SetFocusBehavior(FocusBehavior::NEVER);
++    GetViewAccessibility().SetName(label.empty() ? u"result" : label);
++    if (selected) {
++      SetBackground(views::CreateRoundedRectBackground(
++          kGlintHover, static_cast<float>(kRowCornerRadius)));
++    }
++  }
++};
++
++BEGIN_METADATA(PaletteRow)
++END_METADATA
++
++class GlintCommandPaletteView : public LocationBarBubbleDelegateView,
++                                public views::TextfieldController {
++  METADATA_HEADER(GlintCommandPaletteView, LocationBarBubbleDelegateView)
++
++ public:
++  GlintCommandPaletteView(Browser* browser, views::View* anchor)
++      : LocationBarBubbleDelegateView(anchor, /*web_contents=*/nullptr),
++        browser_(browser) {
++    SetArrow(views::BubbleBorder::Arrow::NONE);
++    SetButtons(static_cast<int>(ui::mojom::DialogButton::kNone));
++    set_fixed_width(kPaletteWidth);
++    set_corner_radius(kCornerRadius);
++    // Straight copy of the Electron Glint palette (light, the Glint default —
++    // Glint forces the light browser theme regardless of the OS setting, so
++    // no OS-dark branching here; that painted the panel dark under light
++    // text).
++    SetBackgroundColor(kGlintPanel);
++    SetShowCloseButton(false);
++    set_close_on_deactivate(true);
++    set_margins(gfx::Insets::TLBR(4, 0, 6, 0));
++
++    SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kVertical));
++
++    input_ = AddChildView(std::make_unique<views::Textfield>());
++    input_->set_controller(this);
++    input_->SetPlaceholderText(u"Search tabs, enter a URL, or search the web…");
++    input_->SetBackgroundColor(SK_ColorTRANSPARENT);
++    input_->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(0, 20)));
++    input_->SetFontList(gfx::FontList().DeriveWithSizeDelta(4));
++    input_->SetPreferredSize(gfx::Size(kPaletteWidth, kInputHeight));
++
++    separator_ = AddChildView(std::make_unique<views::Separator>());
++
++    list_ = AddChildView(std::make_unique<views::View>());
++    list_->SetLayoutManager(std::make_unique<views::BoxLayout>(
++        views::BoxLayout::Orientation::kVertical));
++    list_->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(6, 8)));
++  }
++
++  GlintCommandPaletteView(const GlintCommandPaletteView&) = delete;
++  GlintCommandPaletteView& operator=(const GlintCommandPaletteView&) = delete;
++
++  ~GlintCommandPaletteView() override {
++    if (instance_ == this) {
++      instance_ = nullptr;
++    }
++  }
++
++  static GlintCommandPaletteView* instance() { return instance_; }
++  static void set_instance(GlintCommandPaletteView* view) { instance_ = view; }
++
++  // views::BubbleDialogDelegateView:
++  views::View* GetInitiallyFocusedView() override { return input_; }
++
++  gfx::Rect GetBubbleBounds() override {
++    // Spotlight placement: horizontally centered, top pinned at ~30% of the
++    // window height (fixed top so the palette doesn't jump as results grow).
++    gfx::Rect bounds = LocationBarBubbleDelegateView::GetBubbleBounds();
++    const gfx::Rect anchor = GetAnchorView()->GetBoundsInScreen();
++    bounds.set_x(anchor.x() + (anchor.width() - bounds.width()) / 2);
++    bounds.set_y(anchor.y() + anchor.height() * 3 / 10);
++    return bounds;
++  }
++
++  void OnWidgetInitialized() override { UpdateResults(); }
++
++  // views::TextfieldController:
++  void ContentsChanged(views::Textfield* sender,
++                       const std::u16string& new_contents) override {
++    selected_ = 0;
++    UpdateResults();
++  }
++
++  bool HandleKeyEvent(views::Textfield* sender,
++                      const ui::KeyEvent& key_event) override {
++    if (key_event.type() != ui::EventType::kKeyPressed) {
++      return false;
++    }
++    switch (key_event.key_code()) {
++      case ui::VKEY_DOWN:
++        if (selected_ + 1 < rows_.size()) {
++          ++selected_;
++          RebuildList();
++        }
++        return true;
++      case ui::VKEY_UP:
++        if (selected_ > 0) {
++          --selected_;
++          RebuildList();
++        }
++        return true;
++      case ui::VKEY_RETURN:
++        ExecuteRow(selected_);
++        return true;
++      case ui::VKEY_ESCAPE:
++        GetWidget()->Close();
++        return true;
++      default:
++        return false;
++    }
++  }
++
++ private:
++  struct Row {
++    enum class Type {
++      kNewTab,
++      kOpen,
++      kTab,
++      kHistory,
++      kProfile,
++      kProfileName,
++      kProfileHint
++    };
++    Type type;
++    std::u16string label;
++    std::u16string meta;
++    GURL url;
++    int tab_index = -1;
++    ui::ImageModel icon;
++    std::string profile_name;
++    std::u16string profile_url;
++  };
++
++  static ui::ImageModel VectorIcon(const gfx::VectorIcon& icon) {
++    return ui::ImageModel::FromVectorIcon(icon, kGlintTextDim, kIconSize);
++  }
++
++  void UpdateResults() {
++    query_ =
++        std::u16string(base::TrimWhitespace(input_->GetText(), base::TRIM_ALL));
++    const std::u16string& query = query_;
++    const std::u16string query_lower = base::i18n::ToLower(query);
++
++    rows_.clear();
++
++    // "/profile Name url" — open url in an isolated named session.
++    if (base::StartsWith(query, u"/profile", base::CompareCase::SENSITIVE)) {
++      const std::u16string rest = std::u16string(
++          base::TrimWhitespace(query.substr(8), base::TRIM_ALL));
++      const size_t space = rest.find(u' ');
++      if (space != std::u16string::npos && space + 1 < rest.size()) {
++        const std::string name = base::UTF16ToUTF8(rest.substr(0, space));
++        const std::u16string url = rest.substr(space + 1);
++        Row row;
++        row.type = Row::Type::kProfile;
++        row.label = u"Open " + url + u" in \"" +
++                    base::UTF8ToUTF16(name) + u"\"";
++        row.meta = u"Profile";
++        row.icon = VectorIcon(vector_icons::kAccountCircleIcon);
++        row.profile_name = name;
++        row.profile_url = url;
++        rows_.push_back(std::move(row));
++      } else {
++        // Suggest existing profiles (filtered by the partial name typed);
++        // Enter prefills "/profile <name> " ready for the URL.
++        const std::string partial =
++            base::ToLowerASCII(base::UTF16ToUTF8(rest));
++        for (const std::string& name : GetGlintProfileNames()) {
++          if (!partial.empty() &&
++              base::ToLowerASCII(name).find(partial) == std::string::npos) {
++            continue;
++          }
++          Row row;
++          row.type = Row::Type::kProfileName;
++          row.label = base::UTF8ToUTF16(name);
++          row.meta = u"Profile";
++          row.icon = VectorIcon(vector_icons::kAccountCircleIcon);
++          row.profile_name = name;
++          rows_.push_back(std::move(row));
++        }
++        Row hint;
++        hint.type = Row::Type::kProfileHint;
++        hint.label = u"/profile Name <url> — new names create a profile";
++        hint.meta = u"Isolated login";
++        hint.icon = VectorIcon(vector_icons::kAccountCircleIcon);
++        rows_.push_back(std::move(hint));
++      }
++      RebuildList();
++      return;
++    }
++
++    if (query.empty()) {
++      rows_.push_back({Row::Type::kNewTab, u"New Tab", u"⏎", GURL(), -1,
++                       VectorIcon(vector_icons::kAdd2Icon)});
++    } else {
++      rows_.push_back({Row::Type::kOpen, u"Open \"" + query + u"\"",
++                       u"URL or search", GURL(), -1,
++                       VectorIcon(vector_icons::kSearchIcon)});
++    }
++
++    // Open tabs matching the query (always listed when the query is empty).
++    TabStripModel* tabs = browser_->tab_strip_model();
++    size_t tab_rows = 0;
++    for (int i = 0; i < tabs->count() && tab_rows < kMaxTabRows; ++i) {
++      content::WebContents* contents = tabs->GetWebContentsAt(i);
++      if (!contents) {
++        continue;
++      }
++      const std::u16string title = contents->GetTitle();
++      const GURL url = contents->GetLastCommittedURL();
++      if (!query_lower.empty() &&
++          base::i18n::ToLower(title).find(query_lower) ==
++              std::u16string::npos &&
++          base::UTF8ToUTF16(url.spec()).find(query_lower) ==
++              std::u16string::npos) {
++        continue;
++      }
++      const gfx::Image favicon = favicon::TabFaviconFromWebContents(contents);
++      rows_.push_back({Row::Type::kTab,
++                       title.empty() ? base::UTF8ToUTF16(url.spec()) : title,
++                       u"Switch", url, i,
++                       favicon.IsEmpty()
++                           ? VectorIcon(vector_icons::kGlobeIcon)
++                           : ui::ImageModel::FromImage(favicon)});
++      ++tab_rows;
++    }
++
++    if (selected_ >= rows_.size()) {
++      selected_ = rows_.empty() ? 0 : rows_.size() - 1;
++    }
++    RebuildList();
++
++    // History rows arrive asynchronously and are appended on callback.
++    tracker_.TryCancelAll();
++    if (!query.empty()) {
++      history::HistoryService* history =
++          HistoryServiceFactory::GetForProfile(
++              browser_->profile(), ServiceAccessType::EXPLICIT_ACCESS);
++      if (history) {
++        history::QueryOptions options;
++        options.max_count = kMaxHistoryRows;
++        history->QueryHistory(
++            query, options,
++            base::BindOnce(&GlintCommandPaletteView::OnHistoryResults,
++                           base::Unretained(this)),
++            &tracker_);
++      }
++    }
++  }
++
++  void OnHistoryResults(history::QueryResults results) {
++    TabStripModel* tabs = browser_->tab_strip_model();
++    for (const history::URLResult& result : results) {
++      bool already_open = false;
++      for (int i = 0; i < tabs->count(); ++i) {
++        content::WebContents* contents = tabs->GetWebContentsAt(i);
++        if (contents && contents->GetLastCommittedURL() == result.url()) {
++          already_open = true;
++          break;
++        }
++      }
++      if (already_open) {
++        continue;
++      }
++      rows_.push_back({Row::Type::kHistory,
++                       result.title().empty()
++                           ? base::UTF8ToUTF16(result.url().spec())
++                           : result.title(),
++                       u"History", result.url(), -1,
++                       VectorIcon(vector_icons::kHistoryIcon)});
++    }
++    RebuildList();
++  }
++
++  void RebuildList() {
++    list_->RemoveAllChildViews();
++    for (size_t i = 0; i < rows_.size(); ++i) {
++      list_->AddChildView(std::make_unique<PaletteRow>(
++          base::BindRepeating(&GlintCommandPaletteView::ExecuteRow,
++                              base::Unretained(this), i),
++          rows_[i].icon, rows_[i].label, rows_[i].meta, i == selected_));
++    }
++    if (GetWidget()) {
++      SizeToContents();
++    }
++  }
++
++  void ExecuteRow(size_t index) {
++    if (index >= rows_.size()) {
++      return;
++    }
++    const Row row = rows_[index];
++    if (row.type == Row::Type::kProfileHint) {
++      return;  // informational row — keep the palette open
++    }
++    if (row.type == Row::Type::kProfileName) {
++      // Prefill the command with the chosen profile; the user types the URL.
++      input_->SetText(u"/profile " + base::UTF8ToUTF16(row.profile_name) +
++                      u" ");
++      selected_ = 0;
++      UpdateResults();
++      return;
++    }
++    const std::u16string query = query_;
++    Browser* browser = browser_;
++    GetWidget()->Close();
++
++    switch (row.type) {
++      case Row::Type::kProfileHint:
++      case Row::Type::kProfileName:
++        return;
++      case Row::Type::kProfile:
++        OpenUrlInGlintProfile(browser, row.profile_name, row.profile_url);
++        break;
++      case Row::Type::kNewTab:
++        chrome::NewTab(browser, NewTabTypes::kNewTabCommand);
++        break;
++      case Row::Type::kTab:
++        browser->tab_strip_model()->ActivateTabAt(row.tab_index);
++        break;
++      case Row::Type::kOpen:
++      case Row::Type::kHistory: {
++        const GURL url = row.type == Row::Type::kOpen
++                             ? ToNavigableUrl(browser, query)
++                                                      : row.url;
++        NavigateParams params(browser, url, ui::PAGE_TRANSITION_TYPED);
++        params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++        Navigate(&params);
++        break;
++      }
++    }
++  }
++
++  static GlintCommandPaletteView* instance_;
++
++  const raw_ptr<Browser> browser_;
++  raw_ptr<views::Textfield> input_ = nullptr;
++  raw_ptr<views::Separator> separator_ = nullptr;
++  raw_ptr<views::View> list_ = nullptr;
++  std::vector<Row> rows_;
++  std::u16string query_;
++  size_t selected_ = 0;
++  base::CancelableTaskTracker tracker_;
++};
++
++// static
++GlintCommandPaletteView* GlintCommandPaletteView::instance_ = nullptr;
++
++BEGIN_METADATA(GlintCommandPaletteView)
++END_METADATA
++
++}  // namespace
++
++void ApplyThemeSetting(Profile* profile, const std::string& value) {
++  ThemeService* theme_service = ThemeServiceFactory::GetForProfile(profile);
++  if (!theme_service) {
++    return;
++  }
++  ThemeService::BrowserColorScheme scheme =
++      ThemeService::BrowserColorScheme::kSystem;
++  if (value == "light") {
++    scheme = ThemeService::BrowserColorScheme::kLight;
++  } else if (value == "dark") {
++    scheme = ThemeService::BrowserColorScheme::kDark;
++  }
++  theme_service->SetBrowserColorScheme(scheme);
++}
++
++void ApplySearchEngineSetting(Profile* profile, const std::string& value) {
++  TemplateURLService* service = TemplateURLServiceFactory::GetForProfile(profile);
++  if (!service || !service->loaded()) {
++    return;
++  }
++  const std::u16string needle = value == "duckduckgo" ? u"duckduckgo"
++                                : value == "bing"     ? u"bing"
++                                                      : u"google";
++  for (TemplateURL* turl : service->GetTemplateURLs()) {
++    if (base::i18n::ToLower(turl->keyword()).find(needle) !=
++        std::u16string::npos) {
++      service->SetUserSelectedDefaultSearchProvider(turl);
++      return;
++    }
++  }
++}
++
++void ApplyAdblockSetting(Profile* profile, const std::string& value) {
++  const bool enable = value == "on";
++  profile->GetPrefs()->SetBoolean("glint.adblock_enabled", enable);
++  auto* component_loader = extensions::ComponentLoader::Get(profile);
++  if (!component_loader) {
++    return;
++  }
++  if (enable) {
++    component_loader->AddGlintAdblock();
++  } else {
++    component_loader->RemoveGlintAdblock();
++  }
++}
++
++void OpenAdblockSettings(Browser* browser) {
++  const extensions::ExtensionSet& extension_set =
++      extensions::ExtensionRegistry::Get(browser->profile())
++          ->enabled_extensions();
++  for (const auto& extension : extension_set) {
++    if (extension->name().find("uBlock") != std::string::npos) {
++      NavigateParams params(browser,
++                            extension->ResolveExtensionURL("dashboard.html"),
++                            ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
++      params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++      Navigate(&params);
++      return;
++    }
++  }
++}
++
++namespace {
++
++// Glint profiles are REAL on-disk profiles ("glint-<name>" directories under
++// the user data dir): every keyed service exists (unlike named OTR profiles,
++// where missing services crashed tab-helper attachment), and logins persist
++// across restarts.
++Profile* GetGlintProfile(const std::string& name) {
++  ProfileManager* profile_manager = g_browser_process->profile_manager();
++  if (!profile_manager) {
++    return nullptr;
++  }
++  std::string dir_name = "glint-";
++  for (char c : name) {
++    dir_name += base::IsAsciiAlphaNumeric(c) ? base::ToLowerASCII(c) : '-';
++  }
++  return profile_manager->GetProfile(
++      profile_manager->user_data_dir().AppendASCII(dir_name));
++}
++
++}  // namespace
++
++std::vector<std::string> GetGlintProfileNames() {
++  std::vector<std::string> names;
++  ProfileManager* profile_manager = g_browser_process->profile_manager();
++  if (!profile_manager) {
++    return names;
++  }
++  for (const ProfileAttributesEntry* entry :
++       profile_manager->GetProfileAttributesStorage()
++           .GetAllProfilesAttributes()) {
++    const std::string base_name = entry->GetPath().BaseName().AsUTF8Unsafe();
++    if (base_name.rfind("glint-", 0) == 0) {
++      names.push_back(base_name.substr(6));
++    }
++  }
++  std::sort(names.begin(), names.end());
++  return names;
++}
++
++void OpenUrlInGlintProfile(Browser* browser,
++                           const std::string& profile_name,
++                           const std::u16string& url_text) {
++  Profile* glint_profile = GetGlintProfile(profile_name);
++  if (!glint_profile) {
++    return;
++  }
++
++  content::WebContents::CreateParams create_params(glint_profile);
++  std::unique_ptr<content::WebContents> contents =
++      content::WebContents::Create(create_params);
++  TabHelpers::AttachTabHelpersForGlint(contents.get());
++
++  content::NavigationController::LoadURLParams load_params(
++      ToNavigableUrl(browser, url_text));
++  load_params.transition_type = ui::PAGE_TRANSITION_TYPED;
++  contents->GetController().LoadURLWithParams(load_params);
++
++  // Join the CURRENT workspace: capture the active tab's group before
++  // appending, then group the new tab into it. Without this the tab lands
++  // ungrouped and the sidebar's adoption logic guesses (wrongly) — profile
++  // tabs must open in the workspace the user is standing in.
++  content::WebContents* raw_contents = contents.get();
++  TabStripModel* tab_strip = browser->tab_strip_model();
++  std::optional<tab_groups::TabGroupId> active_group =
++      tab_strip->GetTabGroupForTab(tab_strip->active_index());
++  tab_strip->AppendWebContents(std::move(contents), /*foreground=*/true);
++  if (active_group) {
++    tab_strip->AddToExistingGroup({tab_strip->active_index()}, *active_group);
++  }
++
++  // Tell the sidebar which profile this tab belongs to: write the
++  // tabId -> profile-name mapping straight into the Glint UI extension's
++  // chrome.storage.local ("glintProfileTabs"). The panel listens on
++  // storage.onChanged and badges the row.
++  const int tab_id = sessions::SessionTabHelper::IdForTab(raw_contents).id();
++  Profile* original = browser->profile()->GetOriginalProfile();
++  const extensions::ExtensionSet& extension_set =
++      extensions::ExtensionRegistry::Get(original)->enabled_extensions();
++  for (const auto& extension : extension_set) {
++    if (extension->name() != "Glint UI") {
++      continue;
++    }
++    extensions::StorageFrontend* frontend =
++        extensions::StorageFrontend::Get(original);
++    if (!frontend) {
++      break;
++    }
++    frontend->RunWithStorage(
++        extension, extensions::settings_namespace::LOCAL,
++        base::BindOnce(
++            [](int tab_id, std::string name, value_store::ValueStore* store) {
++              value_store::ValueStore::ReadResult read =
++                  store->Get("glintProfileTabs");
++              base::DictValue map;
++              if (read.status().ok()) {
++                base::DictValue* existing =
++                    read.settings().FindDict("glintProfileTabs");
++                if (existing) {
++                  map = std::move(*existing);
++                }
++              }
++              map.Set(base::NumberToString(tab_id), name);
++              store->Set(value_store::ValueStore::DEFAULTS, "glintProfileTabs",
++                         base::Value(std::move(map)));
++            },
++            tab_id, profile_name));
++    break;
++  }
++}
++
++void ActivateAdjacentWorkspace(Browser* browser, int delta) {
++  TabStripModel* tab_strip = browser->tab_strip_model();
++  if (tab_strip->empty()) {
++    return;
++  }
++  // Collect groups in tab order.
++  std::vector<tab_groups::TabGroupId> ordered_groups;
++  for (int i = 0; i < tab_strip->count(); ++i) {
++    std::optional<tab_groups::TabGroupId> group =
++        tab_strip->GetTabGroupForTab(i);
++    if (group && std::find(ordered_groups.begin(), ordered_groups.end(),
++                           *group) == ordered_groups.end()) {
++      ordered_groups.push_back(*group);
++    }
++  }
++  if (ordered_groups.empty()) {
++    return;
++  }
++
++  // Position of the active tab's group; step |delta| with wrap-around.
++  std::optional<tab_groups::TabGroupId> active_group =
++      tab_strip->GetTabGroupForTab(tab_strip->active_index());
++  size_t current = 0;
++  if (active_group) {
++    auto it =
++        std::find(ordered_groups.begin(), ordered_groups.end(), *active_group);
++    if (it != ordered_groups.end()) {
++      current = static_cast<size_t>(it - ordered_groups.begin());
++    }
++  }
++  const size_t count = ordered_groups.size();
++  const size_t target_index =
++      (current + count + static_cast<size_t>((delta % static_cast<int>(count)) +
++                                             static_cast<int>(count))) %
++      count;
++  const tab_groups::TabGroupId& target = ordered_groups[target_index];
++
++  // Focus the group's most recently active tab.
++  int best_index = -1;
++  base::TimeTicks best_time;
++  for (int i = 0; i < tab_strip->count(); ++i) {
++    if (tab_strip->GetTabGroupForTab(i) != target) {
++      continue;
++    }
++    content::WebContents* contents = tab_strip->GetWebContentsAt(i);
++    const base::TimeTicks last_active =
++        contents ? contents->GetLastActiveTimeTicks() : base::TimeTicks();
++    if (best_index == -1 || last_active > best_time) {
++      best_index = i;
++      best_time = last_active;
++    }
++  }
++  if (best_index != -1) {
++    tab_strip->ActivateTabAt(best_index);
++  }
++}
++
++void OpenGlintSettings(Browser* browser) {
++  const extensions::ExtensionSet& extension_set =
++      extensions::ExtensionRegistry::Get(browser->profile())
++          ->enabled_extensions();
++  for (const auto& extension : extension_set) {
++    if (extension->name() == "Glint UI") {
++      std::string profiles_param;
++      for (const std::string& name : GetGlintProfileNames()) {
++        if (!profiles_param.empty()) {
++          profiles_param += ",";
++        }
++        profiles_param += base::EscapeQueryParamValue(name, /*use_plus=*/false);
++      }
++      NavigateParams params(
++          browser,
++          extension->ResolveExtensionURL("settings.html?glintProfiles=" +
++                                         profiles_param),
++          ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
++      params.disposition = WindowOpenDisposition::NEW_POPUP;
++      // App-style trusted popup: title bar only, no location bar.
++      params.app_id = extension->id();
++      params.trusted_source = true;
++      params.window_features.bounds = gfx::Rect(0, 0, 1000, 720);
++      Navigate(&params);
++      return;
++    }
++  }
++  chrome::ShowSettings(browser);
++}
++
++void ShowCommandPalette(Browser* browser) {
++  if (GlintCommandPaletteView::instance()) {
++    GlintCommandPaletteView::instance()->GetWidget()->Activate();
++    return;
++  }
++  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
++  if (!browser_view) {
++    return;
++  }
++  auto bubble =
++      std::make_unique<GlintCommandPaletteView>(browser, browser_view);
++  GlintCommandPaletteView* raw = bubble.get();
++  views::Widget* widget =
++      views::BubbleDialogDelegateView::CreateBubble(std::move(bubble));
++  GlintCommandPaletteView::set_instance(raw);
++  widget->Show();
++}
++
++}  // namespace glint
+diff --git a/chrome/browser/ui/views/glint/glint_command_palette.h b/chrome/browser/ui/views/glint/glint_command_palette.h
+new file mode 100644
+index 0000000000..f4e8015e17
+--- /dev/null
++++ b/chrome/browser/ui/views/glint/glint_command_palette.h
+@@ -0,0 +1,59 @@
++// Copyright 2026 The Glint Authors.
++// Use of this source code is governed by a BSD-style license.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_GLINT_GLINT_COMMAND_PALETTE_H_
++#define CHROME_BROWSER_UI_VIEWS_GLINT_GLINT_COMMAND_PALETTE_H_
++
++#include <string>
++#include <vector>
++
++class Browser;
++class Profile;
++
++namespace glint {
++
++// Shows the Glint command palette for |browser| (bound to ⌘T): search open
++// tabs, browsing history, or type a URL / web search. If a palette is already
++// showing for this browser it is refocused. Header stays views-free so
++// non-views callers (browser_command_controller) can include it.
++void ShowCommandPalette(Browser* browser);
++
++// Opens the Glint settings page (served by the Glint UI extension) in a
++// standalone popup window. Falls back to the native settings if the
++// extension is not installed.
++void OpenGlintSettings(Browser* browser);
++
++// glint://set-theme/<system|light|dark> — flips the native browser color
++// scheme so the Glint settings page controls the real theme.
++void ApplyThemeSetting(Profile* profile, const std::string& value);
++
++// glint://set-search/<google|duckduckgo|bing> — selects the matching
++// prepopulated engine as the browser's real default search provider.
++void ApplySearchEngineSetting(Profile* profile, const std::string& value);
++
++// glint://set-adblock/<on|off> — toggles the bundled uBlock Origin Lite
++// component extension and persists the choice in glint.adblock_enabled.
++void ApplyAdblockSetting(Profile* profile, const std::string& value);
++
++// glint://adblock-settings — opens the bundled adblocker's dashboard.
++void OpenAdblockSettings(Browser* browser);
++
++// ⌥⌘←/→: activates the previous/next workspace (tab group, ordered by tab
++// position, wrapping), focusing its most recently active tab.
++void ActivateAdjacentWorkspace(Browser* browser, int delta);
++
++// "/profile <name> <url>" (command palette): opens |url_text| in the named
++// Glint profile — an isolated named off-the-record session — as a normal tab
++// in |browser|'s window, so several accounts of one site can live side by
++// side in the same workspace.
++void OpenUrlInGlintProfile(Browser* browser,
++                           const std::string& profile_name,
++                           const std::u16string& url_text);
++
++// Names of existing Glint profiles ("glint-*" profile directories),
++// prefix stripped.
++std::vector<std::string> GetGlintProfileNames();
++
++}  // namespace glint
++
++#endif  // CHROME_BROWSER_UI_VIEWS_GLINT_GLINT_COMMAND_PALETTE_H_
+diff --git a/chrome/browser/ui/views/glint/glint_glass_mac.h b/chrome/browser/ui/views/glint/glint_glass_mac.h
+new file mode 100644
+index 0000000000..b5ce2d761c
+--- /dev/null
++++ b/chrome/browser/ui/views/glint/glint_glass_mac.h
+@@ -0,0 +1,28 @@
++// Copyright 2026 The Glint Authors.
++// Use of this source code is governed by a BSD-style license.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_GLINT_GLINT_GLASS_MAC_H_
++#define CHROME_BROWSER_UI_VIEWS_GLINT_GLINT_GLASS_MAC_H_
++
++#include "third_party/skia/include/core/SkColor.h"
++#include "ui/gfx/geometry/insets.h"
++
++namespace views {
++class Widget;
++}
++
++namespace glint {
++
++// Inserts a Liquid Glass (NSGlassEffectView) layer beneath |widget|'s content
++// on macOS 26+. |insets| carves the glass down to the visible panel (a bubble
++// widget's window includes transparent shadow margins), |corner_radius|
++// rounds it, and |tint| (with its alpha) is applied as the glass tint —
++// the widget's own background should be fully transparent. No-op pre-26.
++void ApplyLiquidGlass(views::Widget* widget,
++                      int corner_radius,
++                      const gfx::Insets& insets,
++                      SkColor tint);
++
++}  // namespace glint
++
++#endif  // CHROME_BROWSER_UI_VIEWS_GLINT_GLINT_GLASS_MAC_H_
+diff --git a/chrome/browser/ui/views/glint/glint_glass_mac.mm b/chrome/browser/ui/views/glint/glint_glass_mac.mm
+new file mode 100644
+index 0000000000..54549f7d91
+--- /dev/null
++++ b/chrome/browser/ui/views/glint/glint_glass_mac.mm
+@@ -0,0 +1,70 @@
++// Copyright 2026 The Glint Authors.
++// Use of this source code is governed by a BSD-style license.
++
++#include "chrome/browser/ui/views/glint/glint_glass_mac.h"
++
++#import <AppKit/AppKit.h>
++
++#include "ui/views/widget/widget.h"
++
++// NSGlassEffectView intercepts hit testing even when placed below the
++// compositor view (same issue the glass browser frame works around) —
++// pass every hit through to the real content.
++API_AVAILABLE(macos(26.0))
++@interface GlintGlassPassthroughView : NSGlassEffectView
++@end
++
++@implementation GlintGlassPassthroughView
++- (NSView*)hitTest:(NSPoint)point {
++  return nil;
++}
++@end
++
++namespace glint {
++
++void ApplyLiquidGlass(views::Widget* widget,
++                      int corner_radius,
++                      const gfx::Insets& insets,
++                      SkColor tint) {
++  if (@available(macOS 26, *)) {
++    if (!widget) {
++      return;
++    }
++    NSWindow* ns_window = widget->GetNativeWindow().GetNativeNSWindow();
++    if (!ns_window) {
++      return;
++    }
++    NSView* content_view = [ns_window contentView];
++    if (!content_view) {
++      return;
++    }
++
++    // The glass sits BELOW the compositor view, so it is only visible where
++    // the window itself is transparent. Bubble windows default to an opaque
++    // gray backing — clear it, or the glass never shows at all.
++    ns_window.opaque = NO;
++    ns_window.backgroundColor = [NSColor clearColor];
++
++    // AppKit is bottom-left origin: views' bottom inset becomes y.
++    const NSRect bounds = content_view.bounds;
++    const NSRect glass_frame = NSMakeRect(
++        bounds.origin.x + insets.left(), bounds.origin.y + insets.bottom(),
++        NSWidth(bounds) - insets.width(), NSHeight(bounds) - insets.height());
++
++    NSGlassEffectView* glass =
++        [[GlintGlassPassthroughView alloc] initWithFrame:glass_frame];
++    glass.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++    glass.style = NSGlassEffectViewStyleRegular;
++    glass.cornerRadius = corner_radius;
++    glass.tintColor = [NSColor
++        colorWithSRGBRed:SkColorGetR(tint) / 255.0
++                   green:SkColorGetG(tint) / 255.0
++                    blue:SkColorGetB(tint) / 255.0
++                   alpha:SkColorGetA(tint) / 255.0];
++    [content_view addSubview:glass
++                  positioned:NSWindowBelow
++                  relativeTo:nil];
++  }
++}
++
++}  // namespace glint

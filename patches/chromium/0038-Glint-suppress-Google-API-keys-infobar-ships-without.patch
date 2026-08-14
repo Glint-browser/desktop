@@ -1,0 +1,26 @@
+From aacb26ba6a4a5fa732315a92b436a447e8e209b7 Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Tue, 11 Aug 2026 08:18:54 +0200
+Subject: [PATCH 38/60] Glint: suppress Google-API-keys infobar (ships without
+ Google keys by design)
+
+---
+ chrome/browser/ui/startup/infobar_utils.cc | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/chrome/browser/ui/startup/infobar_utils.cc b/chrome/browser/ui/startup/infobar_utils.cc
+index 4907b9a951..df17f80c24 100644
+--- a/chrome/browser/ui/startup/infobar_utils.cc
++++ b/chrome/browser/ui/startup/infobar_utils.cc
+@@ -185,9 +185,8 @@ void AddInfoBarsIfNecessary(BrowserWindowInterface* browser,
+   infobars::ContentInfoBarManager* infobar_manager =
+       infobars::ContentInfoBarManager::FromWebContents(web_contents);
+ 
+-  if (!google_apis::HasAPIKeyConfigured()) {
+-    GoogleApiKeysInfoBarDelegate::Create(infobar_manager);
+-  }
++  // Glint: no Google-API-keys nag — Glint ships without Google service keys
++  // by design; the infobar would show on every launch.
+ 
+   if (ObsoleteSystem::IsObsoleteNowOrSoon()) {
+     PrefService* local_state = g_browser_process->local_state();

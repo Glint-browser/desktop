@@ -1,0 +1,55 @@
+From 4b57494b23d52c218065e60259d6e429f3773e00 Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Wed, 12 Aug 2026 09:33:49 +0200
+Subject: [PATCH 42/60] Glint: always boot the Default profile, never force the
+ profile picker
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Glint's /profile sessions are secondary profiles opened as tabs — they must
+not capture startup (last-used) nor trigger the picker at launch.
+---
+ chrome/browser/profiles/profile_manager.cc           | 8 ++++++++
+ chrome/browser/ui/startup/startup_browser_creator.cc | 9 +++++++++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/chrome/browser/profiles/profile_manager.cc b/chrome/browser/profiles/profile_manager.cc
+index 746d4e9442..efcbc73d5f 100644
+--- a/chrome/browser/profiles/profile_manager.cc
++++ b/chrome/browser/profiles/profile_manager.cc
+@@ -952,6 +952,14 @@ base::FilePath ProfileManager::GetLastUsedProfileDir() {
+ 
+ // static
+ base::FilePath ProfileManager::GetLastUsedProfileBaseName() {
++  // Glint: always boot into the Default profile. Glint's /profile sessions
++  // are secondary profiles opened as tabs — they must never capture the
++  // startup profile (that left the browser starting without the Glint UI).
++  static volatile bool glint_force_default_profile = true;
++  if (glint_force_default_profile) {
++    return base::FilePath::FromASCII(chrome::kInitialProfile);
++  }
++
+   PrefService* local_state = g_browser_process->local_state();
+   DCHECK(local_state);
+   base::FilePath last_used_profile_base_name =
+diff --git a/chrome/browser/ui/startup/startup_browser_creator.cc b/chrome/browser/ui/startup/startup_browser_creator.cc
+index bed74e910d..1246e276f0 100644
+--- a/chrome/browser/ui/startup/startup_browser_creator.cc
++++ b/chrome/browser/ui/startup/startup_browser_creator.cc
+@@ -211,6 +211,15 @@ StartupProfileMode GetStartupProfileMode(
+     ProfileManager* profile_manager,
+     bool has_command_line_specified_profile_directory,
+     const base::CommandLine& command_line) {
++  // Glint: never force the profile picker at launch — Glint boots straight
++  // into the last-used profile (Glint's /profile sessions create extra
++  // profile directories that would otherwise trigger the picker). Volatile
++  // so the compiler can't prove the rest unreachable (-Wunreachable-code).
++  static volatile bool glint_skip_profile_picker = true;
++  if (glint_skip_profile_picker) {
++    return StartupProfileMode::kBrowserWindow;
++  }
++
+   // Skip the profile picker when Chrome is restarted (e.g. after an update) so
+   // that the session can be restored.
+   if (StartupBrowserCreator::WasRestarted()) {

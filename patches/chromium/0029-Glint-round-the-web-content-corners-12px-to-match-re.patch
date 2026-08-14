@@ -1,0 +1,24 @@
+From 6c2f27b2dae89432c8db2543585d8ad5dee39b3c Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 14:26:38 +0200
+Subject: [PATCH 29/60] Glint: round the web content corners (12px) to match
+ reference
+
+---
+ chrome/browser/ui/views/frame/contents_container_view.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/chrome/browser/ui/views/frame/contents_container_view.cc b/chrome/browser/ui/views/frame/contents_container_view.cc
+index be9d06d804..8b54a922aa 100644
+--- a/chrome/browser/ui/views/frame/contents_container_view.cc
++++ b/chrome/browser/ui/views/frame/contents_container_view.cc
+@@ -171,6 +171,9 @@ ContentsContainerView::ContentsContainerView(BrowserView* browser_view)
+       AddChildView(std::make_unique<ContentsCaptureBorderView>(mini_toolbar_));
+ 
+   view_bounds_observer_.Observe(contents_view_);
++
++  // Glint: the web contents' corners are rounded (reference design).
++  SetRoundedCorners(gfx::RoundedCornersF(12.0f));
+ }
+ 
+ ContentsContainerView::~ContentsContainerView() {

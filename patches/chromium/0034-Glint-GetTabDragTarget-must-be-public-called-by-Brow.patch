@@ -1,0 +1,30 @@
+From ca1d72b4b067e4da6e60918777ff9652d4491063 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 15:55:16 +0200
+Subject: [PATCH 34/60] Glint: GetTabDragTarget must be public (called by
+ BrowserView)
+
+---
+ .../browser/ui/views/frame/vertical_tab_strip_region_view.h | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index d69da5b5aa..f971eca4ac 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -339,10 +339,14 @@ class VerticalTabStripRegionView final
+                           bookmarks::BookmarkModelObserver>
+       glint_bookmark_observation_{this};
+ 
++ public:
+   // Glint: dropping a dragged tab onto a folder row files it into that folder
+   // (instead of tearing off into a new window). Shadows the base class's
+-  // non-virtual method; BrowserView calls through this type.
++  // non-virtual method; BrowserView calls through this type, so it must be
++  // public.
+   TabDragTarget* GetTabDragTarget(const gfx::Point& point_in_screen);
++
++ private:
+   std::optional<int64_t> GlintFolderIdAtScreenPoint(
+       const gfx::Point& point_in_screen) const;
+   // TabDragTarget:

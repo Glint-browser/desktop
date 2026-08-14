@@ -1,0 +1,26 @@
+From 9dbbfe16489760a399f6de564a781b6c90d8eb78 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Mon, 20 Jul 2026 13:06:24 +0200
+Subject: [PATCH 21/60] Glint: disable native macOS window tabbing to remove
+ AppKit's own tab-bar affordances near the traffic lights
+
+---
+ .../remote_cocoa/app_shim/native_widget_ns_window_bridge.mm  | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/components/remote_cocoa/app_shim/native_widget_ns_window_bridge.mm b/components/remote_cocoa/app_shim/native_widget_ns_window_bridge.mm
+index 955e295f85..85ff9132d3 100644
+--- a/components/remote_cocoa/app_shim/native_widget_ns_window_bridge.mm
++++ b/components/remote_cocoa/app_shim/native_widget_ns_window_bridge.mm
+@@ -389,6 +389,11 @@ NSUInteger CountBridgedWindows(NSArray* child_windows) {
+   }
+   ns_window.releasedWhenClosed = NO;
+ 
++  // Glint: disable native macOS window tabbing. Without this, AppKit can draw
++  // its own small tab-bar affordances (e.g. a "new tab" square) over the
++  // traffic-light area, which visually clashes with Glint's own tab strip.
++  ns_window.tabbingMode = NSWindowTabbingModeDisallowed;
++
+   if (params->titlebar_appears_transparent) {
+     ns_window.titlebarAppearsTransparent = YES;
+   }

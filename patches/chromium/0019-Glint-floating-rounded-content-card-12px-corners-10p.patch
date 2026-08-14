@@ -1,0 +1,69 @@
+From 99eb5e6d1b293f704708a238d10964709de16bec Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Mon, 6 Jul 2026 22:04:02 +0200
+Subject: [PATCH 19/60] Glint: floating rounded content card - 12px corners,
+ 10px gray margin, frame-colored widget bg, invisible corner patches
+
+---
+ chrome/browser/ui/views/frame/browser_view.cc               | 4 +++-
+ chrome/browser/ui/views/frame/contents_container_view.cc    | 6 +++++-
+ .../ui/views/frame/vertical_tab_strip_region_view.cc        | 4 +++-
+ 3 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/browser_view.cc b/chrome/browser/ui/views/frame/browser_view.cc
+index 9926c10c1d..86a2e93fe2 100644
+--- a/chrome/browser/ui/views/frame/browser_view.cc
++++ b/chrome/browser/ui/views/frame/browser_view.cc
+@@ -5923,7 +5923,9 @@ void BrowserView::FrameColorsChanged() {
+     web_app_window_title_->SetBackgroundColor(frame_color);
+     web_app_window_title_->SetEnabledColor(caption_color);
+   }
+-  GetWidget()->SetBackgroundColor(kColorToolbar);
++  // Glint: fill the widget with the frame color so the margin around the
++  // floating rounded content card reads as the sidebar gray (Arc style).
++  GetWidget()->SetBackgroundColor(ui::kColorFrameActive);
+ }
+ 
+ void BrowserView::UpdateAccessibleNameForAllTabs() {
+diff --git a/chrome/browser/ui/views/frame/contents_container_view.cc b/chrome/browser/ui/views/frame/contents_container_view.cc
+index 5302f8f4cd..96c4043f68 100644
+--- a/chrome/browser/ui/views/frame/contents_container_view.cc
++++ b/chrome/browser/ui/views/frame/contents_container_view.cc
+@@ -171,6 +171,10 @@ ContentsContainerView::ContentsContainerView(BrowserView* browser_view)
+       AddChildView(std::make_unique<ContentsCaptureBorderView>(mini_toolbar_));
+ 
+   view_bounds_observer_.Observe(contents_view_);
++
++  // Glint: the web contents render as a floating rounded card (Arc style).
++  // The margin around it is applied in CalculateProposedLayout().
++  SetRoundedCorners(gfx::RoundedCornersF(12.0f));
+ }
+ 
+ ContentsContainerView::~ContentsContainerView() {
+@@ -674,7 +678,7 @@ views::ProposedLayout ContentsContainerView::CalculateProposedLayout(
+   auto* const content_layout = layouts.GetLayoutFor(contents_view_);
+   // Glint: float the web content in a rounded "card" by insetting it, leaving a
+   // margin of the neutral background around it on all sides (the Arc/Glint look).
+-  constexpr int kGlintContentMargin = 8;
++  constexpr int kGlintContentMargin = 10;
+   content_layout->bounds.Inset(gfx::Insets::TLBR(
+       kGlintContentMargin, kGlintContentMargin, kGlintContentMargin,
+       kGlintContentMargin));
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index cda72804aa..6d2ad8616d 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -494,10 +494,12 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+ 
+   GetViewAccessibility().SetRole(ax::mojom::Role::kTabList);
+ 
++  // Glint: corner patches match the frame so they vanish against the gray
++  // background (the content is a floating card, not joined to a toolbar).
+   SetBackground(std::make_unique<CustomCornersBackground>(
+       *this, *browser_view,
+       /*primary_color=*/CustomCornersBackground::FrameTheme(),
+-      /*corner_color=*/CustomCornersBackground::ToolbarTheme()));
++      /*corner_color=*/CustomCornersBackground::FrameTheme()));
+ 
+   shadow_frame_ = AddChildView(std::make_unique<ShadowFrameView>(
+       kExpandOnHoverShadowElevation, kExpandOnHoverShadowAlpha));

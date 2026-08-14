@@ -1,0 +1,37 @@
+From a52e47fbebf6d3f11432d7abfa4ca071c17576b3 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Thu, 23 Jul 2026 09:17:08 +0200
+Subject: [PATCH 37/60] Glint: unpin Chromium-global pinned tabs during
+ adoption - pinned tabs bypass groups and leaked into every space
+
+---
+ .../frame/vertical_tab_strip_region_view.cc      | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 62335f0067..82a7779453 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -1566,6 +1566,22 @@ void VerticalTabStripRegionView::GlintAdoptOrphanTabs() {
+   if (!group_model) {
+     return;
+   }
++  // Spaces own every tab. Chromium's global pinned tabs sit outside groups
++  // and would show in ALL spaces, so unpin them first and let them join the
++  // active space like any other tab. (Glint's own pinning — favorites/folders
++  // — replaces Chromium pinning.)
++  for (int i = 0; i < tsm->count();) {
++    if (tsm->IsTabPinned(i)) {
++      LOG(ERROR) << "GLINT adopt: unpinning globally-pinned tab at " << i;
++      tsm->SetTabPinned(i, false);
++      // Unpinning reorders tabs; restart the scan (pinned count strictly
++      // decreases, so this terminates).
++      i = 0;
++    } else {
++      ++i;
++    }
++  }
++
+   std::vector<int> orphans;
+   for (int i = 0; i < tsm->count(); ++i) {
+     if (!tsm->IsTabPinned(i) && !tsm->GetTabGroupForTab(i).has_value()) {

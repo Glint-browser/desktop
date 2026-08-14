@@ -1,0 +1,433 @@
+From f508b9e2279ec3563aeb0a8d56147239fa2d5466 Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Wed, 12 Aug 2026 09:46:45 +0200
+Subject: [PATCH 43/60] Glint: adblock in profile tabs, theme-aware palette,
+ Glint profile deletion
+
+- Schibsted CMP blocker moved to a bundled component extension
+  (glint_schibsted) so it covers every profile incl. /profile sessions;
+  loader generalized for both bundled blockers
+- Command palette follows the browser color scheme (Electron dark palette)
+- glint://delete-profile/<name>: closes the profile's tabs in all windows
+  and schedules the profile directory for deletion (settings > Profiles)
+---
+ .../browser/chrome_content_browser_client.cc  |   4 +
+ chrome/browser/extensions/component_loader.cc |  56 ++++++---
+ chrome/browser/extensions/component_loader.h  |   3 +-
+ .../glint_schibsted/css/schibsted.css         |  19 +++
+ .../resources/glint_schibsted/manifest.json   |  43 +++++++
+ .../glint_schibsted/rules/schibsted.json      |   6 +
+ .../ui/views/glint/glint_command_palette.cc   | 110 +++++++++++++++---
+ .../ui/views/glint/glint_command_palette.h    |   4 +
+ 8 files changed, 208 insertions(+), 37 deletions(-)
+ create mode 100644 chrome/browser/resources/glint_schibsted/css/schibsted.css
+ create mode 100644 chrome/browser/resources/glint_schibsted/manifest.json
+ create mode 100644 chrome/browser/resources/glint_schibsted/rules/schibsted.json
+
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index 571d9018b7..26bbb4dff3 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -562,6 +562,7 @@
+ #include "chrome/browser/search/instant_service_factory.h"
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/themes/theme_service_factory.h"
++#include "base/strings/escape.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
+ #include "chrome/browser/ui/views/glint/glint_command_palette.h"
+@@ -7323,6 +7324,9 @@ bool ChromeContentBrowserClient::HandleExternalProtocol(
+       } else if (base::StartsWith(glint_spec, "glint://set-adblock/")) {
+         glint::ApplyAdblockSetting(
+             glint_profile, glint_spec.substr(strlen("glint://set-adblock/")));
++      } else if (base::StartsWith(glint_spec, "glint://delete-profile/")) {
++        glint::DeleteGlintProfile(base::UnescapeBinaryURLComponent(
++            glint_spec.substr(strlen("glint://delete-profile/"))));
+       } else if (base::StartsWith(glint_spec, "glint://adblock-settings")) {
+         auto* glint_collection =
+             ProfileBrowserCollection::GetForProfile(glint_profile);
+diff --git a/chrome/browser/extensions/component_loader.cc b/chrome/browser/extensions/component_loader.cc
+index 13212fba33..3ad6e8b8b5 100644
+--- a/chrome/browser/extensions/component_loader.cc
++++ b/chrome/browser/extensions/component_loader.cc
+@@ -292,33 +292,55 @@ ExtensionId ComponentLoader::Add(base::DictValue parsed_manifest,
+   return added_info.extension_id;
+ }
+ 
+-void ComponentLoader::AddGlintAdblock() {
+-  if (!glint_adblock_id_.empty()) {
+-    return;
+-  }
++namespace {
++
++// Resolves a bundled Glint component dir: packaged resources first, source
++// tree in dev builds.
++base::FilePath GlintComponentPath(const char* dir_name) {
+   base::FilePath path;
+   if (base::PathService::Get(chrome::DIR_RESOURCES, &path)) {
+-    path = path.Append(FILE_PATH_LITERAL("glint_ublock"));
++    path = path.AppendASCII(dir_name);
++    if (base::PathExists(path)) {
++      return path;
++    }
+   }
+-  if (path.empty() || !base::PathExists(path)) {
+-    base::FilePath src_root;
+-    if (base::PathService::Get(base::DIR_SRC_TEST_DATA_ROOT, &src_root)) {
+-      path = src_root.Append(
+-          FILE_PATH_LITERAL("chrome/browser/resources/glint_ublock"));
++  base::FilePath src_root;
++  if (base::PathService::Get(base::DIR_SRC_TEST_DATA_ROOT, &src_root)) {
++    path = src_root.AppendASCII("chrome/browser/resources")
++               .AppendASCII(dir_name);
++    if (base::PathExists(path)) {
++      return path;
+     }
+   }
+-  if (path.empty() || !base::PathExists(path)) {
+-    return;
++  return {};
++}
++
++}  // namespace
++
++void ComponentLoader::AddGlintAdblock() {
++  if (glint_adblock_id_.empty()) {
++    base::FilePath path = GlintComponentPath("glint_ublock");
++    if (!path.empty()) {
++      glint_adblock_id_ = AddOrReplace(path);
++    }
++  }
++  if (glint_schibsted_id_.empty()) {
++    base::FilePath path = GlintComponentPath("glint_schibsted");
++    if (!path.empty()) {
++      glint_schibsted_id_ = AddOrReplace(path);
++    }
+   }
+-  glint_adblock_id_ = AddOrReplace(path);
+ }
+ 
+ void ComponentLoader::RemoveGlintAdblock() {
+-  if (glint_adblock_id_.empty()) {
+-    return;
++  if (!glint_adblock_id_.empty()) {
++    Remove(glint_adblock_id_);
++    glint_adblock_id_.clear();
++  }
++  if (!glint_schibsted_id_.empty()) {
++    Remove(glint_schibsted_id_);
++    glint_schibsted_id_.clear();
+   }
+-  Remove(glint_adblock_id_);
+-  glint_adblock_id_.clear();
+ }
+ 
+ ExtensionId ComponentLoader::AddOrReplace(const base::FilePath& path) {
+diff --git a/chrome/browser/extensions/component_loader.h b/chrome/browser/extensions/component_loader.h
+index 61082cd597..c8c403dc3e 100644
+--- a/chrome/browser/extensions/component_loader.h
++++ b/chrome/browser/extensions/component_loader.h
+@@ -262,8 +262,9 @@ class ComponentLoader : public KeyedService {
+ 
+   raw_ptr<Profile> profile_;
+ 
+-  // Glint: id of the loaded bundled adblocker (empty when not loaded).
++  // Glint: ids of the loaded bundled blockers (empty when not loaded).
+   ExtensionId glint_adblock_id_;
++  ExtensionId glint_schibsted_id_;
+ 
+   raw_ptr<ExtensionSystem, AcrossTasksDanglingUntriaged> extension_system_;
+ 
+diff --git a/chrome/browser/resources/glint_schibsted/css/schibsted.css b/chrome/browser/resources/glint_schibsted/css/schibsted.css
+new file mode 100644
+index 0000000000..fbee628c18
+--- /dev/null
++++ b/chrome/browser/resources/glint_schibsted/css/schibsted.css
+@@ -0,0 +1,19 @@
++/* Schibsted Blocker (github.com/BarniKjellerenXD/Schibsted-blocker-Ublock):
++   hides the "pay-to-reject" CMP popup and undoes its scroll locks.
++   Sourcepoint locks scrolling on BOTH <html> (sp-message-open class) and
++   <body> — the original list only unlocked body, leaving pages
++   unscrollable. */
++div[id^="sp_message_container"],
++iframe[id^="sp_message_iframe"] {
++  display: none !important;
++}
++
++html,
++body,
++html.sp-message-open,
++html.sp-message-open body {
++  position: static !important;
++  overflow: auto !important;
++  height: auto !important;
++  top: auto !important;
++}
+diff --git a/chrome/browser/resources/glint_schibsted/manifest.json b/chrome/browser/resources/glint_schibsted/manifest.json
+new file mode 100644
+index 0000000000..b6bfd13bf8
+--- /dev/null
++++ b/chrome/browser/resources/glint_schibsted/manifest.json
+@@ -0,0 +1,43 @@
++{
++  "manifest_version": 3,
++  "name": "Glint Schibsted Blocker",
++  "version": "1.0.0",
++  "description": "Blocks Schibsted's pay-to-reject CMP popup (bundled Glint component).",
++  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsJpw8k8gxyPDKI1/e8R3ZX/ZgQ9KqAiSkXs0qmVO4f6h3wN+R+3QVhB3GxDNpCxoEm0NUALNZwtgmRZy+VhZm6LUub2WgUJvA+SoOsUkxiVoohIXSiUUUzhuVzKjIVtXrl9ysgx5IPqpz/uGiP0GQz5AquUfQsG3cMD2gGvKQOWA1IXOtuexnwp3X6DjYSiQA8xZujbWo+jaLTska8fOf7/x8LvNvMp+zaT+CHkUAOgIni923WfAon5hB/F/mf0SBTEfSDanb16OOqLK0aOU94nQX+KzMydS56ELBlR64xEwwY11fo6ZWL4y1Tq9u/pZ0Nm1Fq904NCVOPRhgthpqQIDAQAB",
++  "permissions": [
++    "declarativeNetRequest"
++  ],
++  "declarative_net_request": {
++    "rule_resources": [
++      {
++        "id": "schibsted",
++        "enabled": true,
++        "path": "rules/schibsted.json"
++      }
++    ]
++  },
++  "content_scripts": [
++    {
++      "matches": [
++        "*://*.vg.no/*",
++        "*://*.aftenposten.no/*",
++        "*://*.bt.no/*",
++        "*://*.aftenbladet.no/*",
++        "*://*.e24.no/*",
++        "*://*.tek.no/*",
++        "*://*.tu.no/*",
++        "*://*.digi.no/*",
++        "*://*.shifter.no/*",
++        "*://*.minmote.no/*",
++        "*://*.godt.no/*",
++        "*://*.vektklubb.no/*",
++        "*://*.finn.no/*",
++        "*://*.prisjakt.no/*"
++      ],
++      "css": [
++        "css/schibsted.css"
++      ],
++      "run_at": "document_start"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/chrome/browser/resources/glint_schibsted/rules/schibsted.json b/chrome/browser/resources/glint_schibsted/rules/schibsted.json
+new file mode 100644
+index 0000000000..d0e6e7f02d
+--- /dev/null
++++ b/chrome/browser/resources/glint_schibsted/rules/schibsted.json
+@@ -0,0 +1,6 @@
++[
++  { "id": 1, "priority": 1, "action": { "type": "block" }, "condition": { "urlFilter": "||cmp.vg.no^" } },
++  { "id": 2, "priority": 1, "action": { "type": "block" }, "condition": { "urlFilter": "||cmp.aftenposten.no^" } },
++  { "id": 3, "priority": 1, "action": { "type": "block" }, "condition": { "urlFilter": "||static.privacy.schibsted.com^" } },
++  { "id": 4, "priority": 1, "action": { "type": "block" }, "condition": { "urlFilter": "||cdn.privacy.schibsted.com^" } }
++]
+diff --git a/chrome/browser/ui/views/glint/glint_command_palette.cc b/chrome/browser/ui/views/glint/glint_command_palette.cc
+index 5ffd2dd1fc..c69e0dd127 100644
+--- a/chrome/browser/ui/views/glint/glint_command_palette.cc
++++ b/chrome/browser/ui/views/glint/glint_command_palette.cc
+@@ -47,6 +47,10 @@
+ #include "extensions/common/api/storage.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/profiles/profile_manager.h"
++#include "base/functional/callback_helpers.h"
++#include "chrome/browser/profiles/delete_profile_helper.h"
++#include "chrome/browser/profiles/profile_metrics.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+ #include "chrome/browser/profiles/profile_attributes_entry.h"
+ #include "chrome/browser/profiles/profile_attributes_storage.h"
+ #include "content/public/browser/navigation_controller.h"
+@@ -95,12 +99,45 @@ constexpr int kCornerRadius = 14;
+ constexpr int kRowCornerRadius = 10;
+ constexpr int kIconSize = 16;
+ 
+-// The Electron Glint palette colors, copied verbatim from styles.css:
+-// --panel-strong over the gray ground, --text, --text-dim, --hover.
+-constexpr SkColor kGlintPanel = SkColorSetRGB(0xF5, 0xF4, 0xF8);
+-constexpr SkColor kGlintText = SkColorSetRGB(0x2B, 0x27, 0x33);
+-constexpr SkColor kGlintTextDim = SkColorSetRGB(0x6B, 0x66, 0x75);
+-constexpr SkColor kGlintHover = SkColorSetA(SK_ColorBLACK, 0x0D);
++// The Electron Glint palette colors (styles.css), light + dark variants.
++struct GlintPaletteColors {
++  SkColor panel;
++  SkColor text;
++  SkColor text_dim;
++  SkColor hover;
++};
++
++constexpr GlintPaletteColors kGlintLight = {
++    SkColorSetRGB(0xF5, 0xF4, 0xF8), SkColorSetRGB(0x2B, 0x27, 0x33),
++    SkColorSetRGB(0x6B, 0x66, 0x75), SkColorSetA(SK_ColorBLACK, 0x0D)};
++
++constexpr GlintPaletteColors kGlintDark = {
++    SkColorSetRGB(0x26, 0x24, 0x30), SkColorSetRGB(0xE8, 0xE6, 0xF0),
++    SkColorSetRGB(0x9A, 0x95, 0xAD), SkColorSetA(SK_ColorWHITE, 0x14)};
++
++// Follows the browser color scheme (Glint settings > Appearance), falling
++// back to the OS for "System".
++const GlintPaletteColors& PaletteColorsFor(Browser* browser) {
++  ThemeService* theme_service =
++      ThemeServiceFactory::GetForProfile(browser->profile());
++  bool dark = false;
++  if (theme_service) {
++    switch (theme_service->GetBrowserColorScheme()) {
++      case ThemeService::BrowserColorScheme::kDark:
++        dark = true;
++        break;
++      case ThemeService::BrowserColorScheme::kLight:
++        dark = false;
++        break;
++      case ThemeService::BrowserColorScheme::kSystem:
++        dark = ui::NativeTheme::GetInstanceForNativeUi()
++                   ->preferred_color_scheme() ==
++               ui::NativeTheme::PreferredColorScheme::kDark;
++        break;
++    }
++  }
++  return dark ? kGlintDark : kGlintLight;
++}
+ constexpr size_t kMaxTabRows = 8;
+ constexpr size_t kMaxHistoryRows = 8;
+ 
+@@ -142,7 +179,8 @@ class PaletteRow : public views::Button {
+              const ui::ImageModel& icon,
+              const std::u16string& label,
+              const std::u16string& meta,
+-             bool selected)
++             bool selected,
++             const GlintPaletteColors& colors)
+       : views::Button(std::move(callback)) {
+     auto* layout = SetLayoutManager(std::make_unique<views::BoxLayout>(
+         views::BoxLayout::Orientation::kHorizontal,
+@@ -157,19 +195,19 @@ class PaletteRow : public views::Button {
+     auto* title = AddChildView(std::make_unique<views::Label>(label));
+     title->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+     title->SetElideBehavior(gfx::ELIDE_TAIL);
+-    title->SetEnabledColor(kGlintText);
++    title->SetEnabledColor(colors.text);
+     layout->SetFlexForView(title, 1);
+ 
+     auto* meta_label = AddChildView(std::make_unique<views::Label>(
+         meta, views::style::CONTEXT_LABEL, views::style::STYLE_SECONDARY));
+-    meta_label->SetEnabledColor(kGlintTextDim);
++    meta_label->SetEnabledColor(colors.text_dim);
+ 
+     SetPreferredSize(gfx::Size(kPaletteWidth - 16, kRowHeight));
+     SetFocusBehavior(FocusBehavior::NEVER);
+     GetViewAccessibility().SetName(label.empty() ? u"result" : label);
+     if (selected) {
+       SetBackground(views::CreateRoundedRectBackground(
+-          kGlintHover, static_cast<float>(kRowCornerRadius)));
++          colors.hover, static_cast<float>(kRowCornerRadius)));
+     }
+   }
+ };
+@@ -184,16 +222,14 @@ class GlintCommandPaletteView : public LocationBarBubbleDelegateView,
+  public:
+   GlintCommandPaletteView(Browser* browser, views::View* anchor)
+       : LocationBarBubbleDelegateView(anchor, /*web_contents=*/nullptr),
+-        browser_(browser) {
++        browser_(browser),
++        colors_(PaletteColorsFor(browser)) {
+     SetArrow(views::BubbleBorder::Arrow::NONE);
+     SetButtons(static_cast<int>(ui::mojom::DialogButton::kNone));
+     set_fixed_width(kPaletteWidth);
+     set_corner_radius(kCornerRadius);
+-    // Straight copy of the Electron Glint palette (light, the Glint default —
+-    // Glint forces the light browser theme regardless of the OS setting, so
+-    // no OS-dark branching here; that painted the panel dark under light
+-    // text).
+-    SetBackgroundColor(kGlintPanel);
++    // Electron Glint palette, light/dark per the browser color scheme.
++    SetBackgroundColor(colors_.panel);
+     SetShowCloseButton(false);
+     set_close_on_deactivate(true);
+     set_margins(gfx::Insets::TLBR(4, 0, 6, 0));
+@@ -301,8 +337,8 @@ class GlintCommandPaletteView : public LocationBarBubbleDelegateView,
+     std::u16string profile_url;
+   };
+ 
+-  static ui::ImageModel VectorIcon(const gfx::VectorIcon& icon) {
+-    return ui::ImageModel::FromVectorIcon(icon, kGlintTextDim, kIconSize);
++  ui::ImageModel VectorIcon(const gfx::VectorIcon& icon) const {
++    return ui::ImageModel::FromVectorIcon(icon, colors_.text_dim, kIconSize);
+   }
+ 
+   void UpdateResults() {
+@@ -448,7 +484,8 @@ class GlintCommandPaletteView : public LocationBarBubbleDelegateView,
+       list_->AddChildView(std::make_unique<PaletteRow>(
+           base::BindRepeating(&GlintCommandPaletteView::ExecuteRow,
+                               base::Unretained(this), i),
+-          rows_[i].icon, rows_[i].label, rows_[i].meta, i == selected_));
++          rows_[i].icon, rows_[i].label, rows_[i].meta, i == selected_,
++          colors_));
+     }
+     if (GetWidget()) {
+       SizeToContents();
+@@ -504,6 +541,7 @@ class GlintCommandPaletteView : public LocationBarBubbleDelegateView,
+   static GlintCommandPaletteView* instance_;
+ 
+   const raw_ptr<Browser> browser_;
++  const GlintPaletteColors colors_;
+   raw_ptr<views::Textfield> input_ = nullptr;
+   raw_ptr<views::Separator> separator_ = nullptr;
+   raw_ptr<views::View> list_ = nullptr;
+@@ -622,6 +660,40 @@ std::vector<std::string> GetGlintProfileNames() {
+   return names;
+ }
+ 
++void DeleteGlintProfile(const std::string& name) {
++  ProfileManager* profile_manager = g_browser_process->profile_manager();
++  if (!profile_manager) {
++    return;
++  }
++  std::string dir_name = "glint-";
++  for (char c : name) {
++    dir_name += base::IsAsciiAlphaNumeric(c) ? base::ToLowerASCII(c) : '-';
++  }
++  const base::FilePath path =
++      profile_manager->user_data_dir().AppendASCII(dir_name);
++
++  // Close the profile's tabs wherever they live (they sit in OTHER
++  // profiles' windows) before tearing the profile down.
++  for (BrowserWindowInterface* bwi : GetAllBrowserWindowInterfaces()) {
++    Browser* open_browser = bwi->GetBrowserForMigrationOnly();
++    if (!open_browser) {
++      continue;
++    }
++    TabStripModel* tab_strip = open_browser->tab_strip_model();
++    for (int i = tab_strip->count() - 1; i >= 0; --i) {
++      content::WebContents* contents = tab_strip->GetWebContentsAt(i);
++      if (contents && Profile::FromBrowserContext(contents->GetBrowserContext())
++                              ->GetPath() == path) {
++        tab_strip->CloseWebContentsAt(i, TabCloseTypes::CLOSE_USER_GESTURE);
++      }
++    }
++  }
++
++  profile_manager->GetDeleteProfileHelper().MaybeScheduleProfileForDeletion(
++      path, base::DoNothing(),
++      ProfileMetrics::DELETE_PROFILE_USER_MANAGER);
++}
++
+ void OpenUrlInGlintProfile(Browser* browser,
+                            const std::string& profile_name,
+                            const std::u16string& url_text) {
+diff --git a/chrome/browser/ui/views/glint/glint_command_palette.h b/chrome/browser/ui/views/glint/glint_command_palette.h
+index f4e8015e17..fe1e6f6d1d 100644
+--- a/chrome/browser/ui/views/glint/glint_command_palette.h
++++ b/chrome/browser/ui/views/glint/glint_command_palette.h
+@@ -54,6 +54,10 @@ void OpenUrlInGlintProfile(Browser* browser,
+ // prefix stripped.
+ std::vector<std::string> GetGlintProfileNames();
+ 
++// glint://delete-profile/<name> — closes the profile's tabs everywhere and
++// schedules the glint-<name> profile directory for deletion.
++void DeleteGlintProfile(const std::string& name);
++
+ }  // namespace glint
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_GLINT_GLINT_COMMAND_PALETTE_H_

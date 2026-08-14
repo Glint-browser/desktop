@@ -1,0 +1,131 @@
+From 060770c9816704724936460d40c3f5ffd561ac4b Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Mon, 20 Jul 2026 13:05:59 +0200
+Subject: [PATCH 20/60] Glint: sidebar cleanup - remove redundant +, unify
+ purple accent into one constant, theme suggestions popup
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 65 ++++++++-----------
+ 1 file changed, 27 insertions(+), 38 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 6d2ad8616d..6459b0540c 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -152,6 +152,14 @@ constexpr ShadowFrameView::ShadowAlpha kExpandOnHoverShadowAlpha(
+      .dark_ambient = 0.0});
+ }  // namespace
+ 
++namespace {
++// Glint's single brand accent, reused everywhere a purple highlight appears
++// (active space dot, suggestion selection) so they can never drift apart.
++constexpr SkColor kGlintAccentPurple = SkColorSetRGB(0x7c, 0x5c, 0xff);
++// Horizontal space to clear the macOS traffic-light window controls.
++constexpr int kGlintTrafficLightClearance = 78;
++}  // namespace
++
+ DEFINE_CLASS_CUSTOM_ELEMENT_EVENT_TYPE(VerticalTabStripRegionView,
+                                        kAnimationCompletedEvent);
+ 
+@@ -222,9 +230,10 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   auto* nav_box = nav_row->SetLayoutManager(std::make_unique<views::BoxLayout>(
+       views::BoxLayout::Orientation::kHorizontal));
+   nav_box->set_between_child_spacing(10);
+-  // Left margin clears the traffic lights.
+-  nav_row->SetProperty(views::kMarginsKey,
+-                       gfx::Insets::TLBR(8, 78, 2, region_horizontal_padding));
++  nav_row->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(8, kGlintTrafficLightClearance, 2,
++                        region_horizontal_padding));
+   nav_row->AddChildView(
+       make_nav_button(&chrome::GoBack, kArrowBackIcon, u"Back"));
+   nav_row->AddChildView(
+@@ -275,9 +284,10 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+       suggestions->SetLayoutManager(std::make_unique<views::FlexLayout>());
+   suggestions_layout->SetOrientation(views::LayoutOrientation::kVertical);
+   suggestions_layout->SetInteriorMargin(gfx::Insets::VH(4, 4));
+-  // Elevated rounded "popup" card behind the suggestion rows.
+-  suggestions->SetBackground(views::CreateRoundedRectBackground(
+-      SkColorSetRGB(0xff, 0xff, 0xff), 12.f));
++  // Elevated rounded "popup" card behind the suggestion rows. Themed (not a
++  // hardcoded white) so it stays correct if the color scheme ever changes.
++  suggestions->SetBackground(
++      views::CreateRoundedRectBackground(ui::kColorMenuBackground, 12.f));
+   suggestions->SetProperty(
+       views::kMarginsKey,
+       gfx::Insets::TLBR(2, region_horizontal_padding, 6,
+@@ -306,38 +316,17 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+                         region_horizontal_padding));
+   glint_pin_hint_ = AddChildView(std::move(pin_hint));
+ 
+-  // Glint: workspace header row — bold space name with a "+" button pushed to
+-  // the right edge (like the "Work" row in the reference). BoxLayout with the
+-  // label flexed keeps the row at its natural height.
+-  auto workspace_row = std::make_unique<views::View>();
+-  auto* workspace_box =
+-      workspace_row->SetLayoutManager(std::make_unique<views::BoxLayout>(
+-          views::BoxLayout::Orientation::kHorizontal));
+-  workspace_box->set_cross_axis_alignment(
+-      views::BoxLayout::CrossAxisAlignment::kCenter);
+-  workspace_row->SetProperty(
+-      views::kMarginsKey,
+-      gfx::Insets::TLBR(2, region_horizontal_padding + 4, 0,
+-                        region_horizontal_padding));
+-
++  // Glint: bold workspace name (e.g. "Personal"). No button here — the "New
++  // Tab" row below is the sidebar's one, unambiguous new-tab affordance, so
++  // this doesn't duplicate it.
+   auto workspace_name = std::make_unique<views::Label>(
+       u"Personal", views::style::CONTEXT_LABEL, views::style::STYLE_EMPHASIZED);
+   workspace_name->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+-  glint_workspace_name_ = workspace_row->AddChildView(std::move(workspace_name));
+-
+-  auto new_folder_button = std::make_unique<views::ImageButton>(
+-      base::BindRepeating(&VerticalTabStripRegionView::GlintNewTab,
+-                          base::Unretained(this)));
+-  new_folder_button->SetImageModel(
+-      views::Button::STATE_NORMAL,
+-      ui::ImageModel::FromVectorIcon(kAddIcon, ui::kColorIcon, 16));
+-  new_folder_button->SetTooltipText(u"New tab");
+-  workspace_row->AddChildView(std::move(new_folder_button));
+-
+-  // The label takes the remaining width, pushing the button to the right.
+-  workspace_box->SetFlexForView(glint_workspace_name_, 1);
+-
+-  AddChildView(std::move(workspace_row));
++  workspace_name->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(6, region_horizontal_padding + 4, 2,
++                        region_horizontal_padding));
++  glint_workspace_name_ = AddChildView(std::move(workspace_name));
+ 
+   // Glint: bookmarks folder row (matches the reference sidebar). Opens the
+   // bookmark manager in the current tab.
+@@ -388,7 +377,7 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+                                                 gfx::Insets(), 8);
+   new_tab_row->SetProperty(
+       views::kMarginsKey,
+-      gfx::Insets::TLBR(6, region_horizontal_padding, 2,
++      gfx::Insets::TLBR(4, region_horizontal_padding, 2,
+                         region_horizontal_padding));
+   AddChildView(std::move(new_tab_row));
+ 
+@@ -1470,7 +1459,7 @@ namespace {
+ constexpr std::array<const char16_t*, 3> kGlintSpaceNames = {u"Personal",
+                                                              u"Work", u"Play"};
+ constexpr std::array<SkColor, 3> kGlintSpaceDotColors = {
+-    SkColorSetRGB(0x7c, 0x5c, 0xff),   // purple
++    kGlintAccentPurple,                // Glint's brand accent
+     SkColorSetRGB(0x27, 0xae, 0x8f),   // teal
+     SkColorSetRGB(0xef, 0x9a, 0x3d)};  // amber
+ constexpr std::array<tab_groups::TabGroupColorId, 3> kGlintSpaceGroupColors = {
+@@ -1765,7 +1754,7 @@ void VerticalTabStripRegionView::UpdateGlintSuggestionHighlight() {
+   for (views::View* child : glint_suggestions_->children()) {
+     if (i == glint_selected_row_) {
+       child->SetBackground(views::CreateRoundedRectBackground(
+-          SkColorSetARGB(0x24, 0x7c, 0x5c, 0xff), 8.f));
++          SkColorSetA(kGlintAccentPurple, 0x24), 8.f));
+     } else {
+       child->SetBackground(nullptr);
+     }

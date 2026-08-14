@@ -1,0 +1,112 @@
+From 7bf321d19a5d31150781b496f8a5cc7df783ad6c Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Wed, 12 Aug 2026 13:24:02 +0200
+Subject: [PATCH 56/60] Glint: fix duplicate Glint UI and hide component
+ extensions from the menu
+
+The unpacked-dev guard raced: component extensions load before installed
+extensions populate the ExtensionRegistry, so the check always passed and
+both the baked and unpacked sidebars ran. Consult ExtensionPrefs instead
+(with a path fallback since prefs manifests can be null for unpacked).
+
+Also filter component-location extensions out of ToolbarActionsModel so
+the sidebar and bundled adblockers never show in the extensions menu, and
+give the vendored uBOL manifest a literal name (component loading skips
+l10n, so __MSG_extName__ rendered raw).
+---
+ chrome/browser/extensions/component_loader.cc | 25 +++++++++++++------
+ .../resources/glint_ublock/manifest.json      |  4 +--
+ .../ui/toolbar/toolbar_actions_model.cc       |  8 ++++++
+ 3 files changed, 28 insertions(+), 9 deletions(-)
+
+diff --git a/chrome/browser/extensions/component_loader.cc b/chrome/browser/extensions/component_loader.cc
+index dccf8226eb..7e00e7982b 100644
+--- a/chrome/browser/extensions/component_loader.cc
++++ b/chrome/browser/extensions/component_loader.cc
+@@ -3,7 +3,8 @@
+ // found in the LICENSE file.
+ 
+ #include "chrome/browser/extensions/component_loader.h"
+-#include "extensions/browser/extension_registry.h"
++
++#include "base/strings/string_util.h"
+ #include "components/prefs/pref_service.h"
+ 
+ #include <optional>
+@@ -323,12 +324,22 @@ void ComponentLoader::AddGlintUi() {
+     return;
+   }
+   // Development machines run the sidebar as an unpacked extension from the
+-  // repo — never load both.
+-  const ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
+-  if (registry) {
+-    for (const auto& extension : registry->GenerateInstalledExtensionsSet()) {
+-      if (extension->name() == "Glint UI" &&
+-          extension->location() != mojom::ManifestLocation::kComponent) {
++  // repo — never load both. Component extensions load before installed
++  // extensions are read into the ExtensionRegistry, so consult install
++  // prefs instead (the manifest there can be null for unpacked installs,
++  // hence the path fallback).
++  const ExtensionPrefs* prefs = ExtensionPrefs::Get(profile_);
++  if (prefs) {
++    for (const auto& info : prefs->GetInstalledExtensionsInfo()) {
++      if (!Manifest::IsUnpackedLocation(info.extension_location)) {
++        continue;
++      }
++      const std::string* name =
++          info.extension_manifest ? info.extension_manifest->FindString("name")
++                                  : nullptr;
++      if ((name && *name == "Glint UI") ||
++          base::EndsWith(info.extension_path.value(), "chromium-ui/dist",
++                         base::CompareCase::SENSITIVE)) {
+         return;
+       }
+     }
+diff --git a/chrome/browser/resources/glint_ublock/manifest.json b/chrome/browser/resources/glint_ublock/manifest.json
+index 5e9d87d46c..38385e5935 100644
+--- a/chrome/browser/resources/glint_ublock/manifest.json
++++ b/chrome/browser/resources/glint_ublock/manifest.json
+@@ -306,7 +306,7 @@
+     ]
+   },
+   "default_locale": "en",
+-  "description": "__MSG_extShortDesc__",
++  "description": "Efficient content blocker bundled with Glint.",
+   "host_permissions": [
+     "<all_urls>"
+   ],
+@@ -319,7 +319,7 @@
+   },
+   "manifest_version": 3,
+   "minimum_chrome_version": "122.0",
+-  "name": "__MSG_extName__",
++  "name": "uBlock Origin Lite",
+   "options_page": "dashboard.html",
+   "permissions": [
+     "activeTab",
+diff --git a/chrome/browser/ui/toolbar/toolbar_actions_model.cc b/chrome/browser/ui/toolbar/toolbar_actions_model.cc
+index b12903bf85..1435d96bbf 100644
+--- a/chrome/browser/ui/toolbar/toolbar_actions_model.cc
++++ b/chrome/browser/ui/toolbar/toolbar_actions_model.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
+ 
++#include "extensions/common/manifest.h"
++
+ #include <algorithm>
+ #include <memory>
+ #include <string>
+@@ -274,6 +276,12 @@ void ToolbarActionsModel::OnReady() {
+ 
+ bool ToolbarActionsModel::ShouldAddExtension(
+     const extensions::Extension* extension) {
++  // Glint: component extensions (the Glint UI sidebar, bundled adblockers)
++  // are part of the browser itself and never appear in the extensions menu.
++  if (extensions::Manifest::IsComponentLocation(extension->location())) {
++    return false;
++  }
++
+   // In incognito mode, don't add any extensions that aren't incognito-enabled.
+   if (profile_->IsOffTheRecord() &&
+       !extensions::util::IsIncognitoEnabled(extension->id(), profile_)) {

@@ -1,0 +1,75 @@
+From e83477a968fea700aaeff7e24a96bb1cc22d6122 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Sun, 5 Jul 2026 23:45:09 +0200
+Subject: [PATCH 11/60] Glint: folder icon on workspace header + hide default
+ control-icon row
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 36 +++++++++++++++----
+ 1 file changed, 30 insertions(+), 6 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 29c11d83ef..fee8e31d1d 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -65,7 +65,10 @@
+ #include "ui/compositor/layer.h"
+ #include "ui/display/screen.h"
+ #include "ui/events/event.h"
++#include "components/vector_icons/vector_icons.h"
++#include "ui/base/models/image_model.h"
+ #include "ui/gfx/text_constants.h"
++#include "ui/views/controls/image_view.h"
+ #include "ui/views/controls/label.h"
+ #include "ui/views/controls/textfield/textfield.h"
+ #include "ui/views/style/typography.h"
+@@ -165,15 +168,30 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   glint_address_bar_ = AddChildView(std::move(glint_address_bar));
+   UpdateGlintAddressBar();
+ 
+-  // Glint: bold workspace name header (like the "Work" space in the reference).
+-  auto workspace_name = std::make_unique<views::Label>(
+-      u"Personal", views::style::CONTEXT_LABEL, views::style::STYLE_EMPHASIZED);
+-  workspace_name->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+-  workspace_name->SetProperty(
++  // Glint: workspace header row — folder icon + bold name (like the "Work"
++  // space in the reference).
++  auto workspace_row = std::make_unique<views::View>();
++  auto* workspace_row_layout =
++      workspace_row->SetLayoutManager(std::make_unique<views::FlexLayout>());
++  workspace_row_layout->SetOrientation(views::LayoutOrientation::kHorizontal);
++  workspace_row_layout->SetCrossAxisAlignment(views::LayoutAlignment::kCenter);
++  workspace_row->SetProperty(
+       views::kMarginsKey,
+       gfx::Insets::TLBR(2, region_horizontal_padding + 4, 0,
+                         region_horizontal_padding));
+-  glint_workspace_name_ = AddChildView(std::move(workspace_name));
++
++  auto folder_icon =
++      std::make_unique<views::ImageView>(ui::ImageModel::FromVectorIcon(
++          vector_icons::kFolderFlippableIcon, ui::kColorIcon, 16));
++  folder_icon->SetProperty(views::kMarginsKey, gfx::Insets::TLBR(0, 0, 0, 6));
++  workspace_row->AddChildView(std::move(folder_icon));
++
++  auto workspace_name = std::make_unique<views::Label>(
++      u"Personal", views::style::CONTEXT_LABEL, views::style::STYLE_EMPHASIZED);
++  workspace_name->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++  glint_workspace_name_ = workspace_row->AddChildView(std::move(workspace_name));
++
++  AddChildView(std::move(workspace_row));
+ 
+   // Glint: subtle "drag to pin" hint under the workspace name.
+   auto pin_hint = std::make_unique<views::Label>(
+@@ -198,6 +216,12 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   top_button_separator_->SetProperty(
+       views::kMarginsKey, gfx::Insets::VH(0, region_horizontal_padding));
+ 
++  // Glint: hide the default tab-strip control icons (collapse/grid/search) and
++  // their separator so the sidebar goes straight from the workspace header into
++  // the tabs, matching the reference design.
++  top_button_container_->SetVisible(false);
++  top_button_separator_->SetVisible(false);
++
+   bottom_button_container_ =
+       AddChildView(std::make_unique<VerticalTabStripBottomContainer>(
+           state_controller_, root_action_item, browser_view->browser(),

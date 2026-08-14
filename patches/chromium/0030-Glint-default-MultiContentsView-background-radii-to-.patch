@@ -1,0 +1,26 @@
+From bcebcac74858cbac0ecee6a43a2c3e00249a09b9 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 15:00:43 +0200
+Subject: [PATCH 30/60] Glint: default MultiContentsView background radii to 12
+ - UpdateContentsBorderAndOverlay was resetting content corners to zero
+
+---
+ chrome/browser/ui/views/frame/multi_contents_view.cc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/chrome/browser/ui/views/frame/multi_contents_view.cc b/chrome/browser/ui/views/frame/multi_contents_view.cc
+index 86edc89c5c..f63a1eeac8 100644
+--- a/chrome/browser/ui/views/frame/multi_contents_view.cc
++++ b/chrome/browser/ui/views/frame/multi_contents_view.cc
+@@ -84,6 +84,11 @@ MultiContentsView::MultiContentsView(
+ 
+   background_view_ =
+       AddChildView(std::make_unique<MultiContentsBackgroundView>(browser_view));
++  // Glint: default the content corner radii to the rounded reference look.
++  // UpdateContentsBorderAndOverlay() propagates GetBackgroundRadii() to the
++  // active ContentsContainerView on every tab update, so this is the single
++  // source of truth for the content rounding.
++  background_view_->SetRoundedCorners(gfx::RoundedCornersF(12.0f));
+ 
+   contents_container_views_.push_back(
+       AddChildView(std::make_unique<ContentsContainerView>(browser_view_)));

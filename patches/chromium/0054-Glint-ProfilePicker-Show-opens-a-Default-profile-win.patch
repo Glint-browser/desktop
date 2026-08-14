@@ -1,0 +1,52 @@
+From 33bb93fb772fc400efa139d26b146d296da2e206 Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Wed, 12 Aug 2026 11:12:22 +0200
+Subject: [PATCH 54/60] =?UTF-8?q?Glint:=20ProfilePicker::Show=20opens=20a?=
+ =?UTF-8?q?=20Default-profile=20window=20instead=20=E2=80=94=20kills=20eve?=
+ =?UTF-8?q?ry=20picker=20entry=20point=20(startup,=20Dock=20reopen,=20menu?=
+ =?UTF-8?q?s)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../ui/views/profiles/profile_picker_view.cc  | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/chrome/browser/ui/views/profiles/profile_picker_view.cc b/chrome/browser/ui/views/profiles/profile_picker_view.cc
+index b6b16dd30d..bb29a58aa6 100644
+--- a/chrome/browser/ui/views/profiles/profile_picker_view.cc
++++ b/chrome/browser/ui/views/profiles/profile_picker_view.cc
+@@ -3,6 +3,8 @@
+ // found in the LICENSE file.
+ 
+ #include "chrome/browser/ui/views/profiles/profile_picker_view.h"
++#include "chrome/browser/ui/browser_commands.h"
++#include "chrome/common/chrome_constants.h"
+ 
+ #include <algorithm>
+ 
+@@ -151,6 +153,23 @@ void ClearLockedProfilesFirstBrowserKeepAlive() {
+ 
+ // static
+ void ProfilePicker::Show(Params&& params) {
++  // Glint: the profile picker never shows — Glint profiles are tab
++  // sessions, not window identities. Every entry point (startup handled in
++  // startup_browser_creator, Dock reopen, menus) opens a Default-profile
++  // window instead.
++  static volatile bool glint_no_profile_picker = true;
++  if (glint_no_profile_picker) {
++    ProfileManager* profile_manager = g_browser_process->profile_manager();
++    if (profile_manager) {
++      Profile* default_profile = profile_manager->GetProfile(
++          profile_manager->user_data_dir().AppendASCII(chrome::kInitialProfile));
++      if (default_profile) {
++        chrome::NewEmptyWindow(default_profile);
++      }
++    }
++    return;
++  }
++
+   // Re-open with new params if necessary.
+   if (g_profile_picker_view && g_profile_picker_view->MaybeReopen(params)) {
+     return;

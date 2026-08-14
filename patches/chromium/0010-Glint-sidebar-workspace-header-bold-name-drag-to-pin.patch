@@ -1,0 +1,76 @@
+From a7c44a9f1112ab129a93d4708f3e6f5fdaa676e4 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Sun, 5 Jul 2026 23:33:21 +0200
+Subject: [PATCH 10/60] Glint: sidebar workspace header (bold name +
+ drag-to-pin hint)
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 24 +++++++++++++++++++
+ .../frame/vertical_tab_strip_region_view.h    |  4 ++++
+ 2 files changed, 28 insertions(+)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 6d04f8dea5..29c11d83ef 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -65,7 +65,10 @@
+ #include "ui/compositor/layer.h"
+ #include "ui/display/screen.h"
+ #include "ui/events/event.h"
++#include "ui/gfx/text_constants.h"
++#include "ui/views/controls/label.h"
+ #include "ui/views/controls/textfield/textfield.h"
++#include "ui/views/style/typography.h"
+ // Glint: sidebar address bar navigation.
+ #include "base/strings/escape.h"
+ #include "base/strings/utf_string_conversions.h"
+@@ -162,6 +165,27 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   glint_address_bar_ = AddChildView(std::move(glint_address_bar));
+   UpdateGlintAddressBar();
+ 
++  // Glint: bold workspace name header (like the "Work" space in the reference).
++  auto workspace_name = std::make_unique<views::Label>(
++      u"Personal", views::style::CONTEXT_LABEL, views::style::STYLE_EMPHASIZED);
++  workspace_name->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++  workspace_name->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(2, region_horizontal_padding + 4, 0,
++                        region_horizontal_padding));
++  glint_workspace_name_ = AddChildView(std::move(workspace_name));
++
++  // Glint: subtle "drag to pin" hint under the workspace name.
++  auto pin_hint = std::make_unique<views::Label>(
++      u"Drag tabs here to pin", views::style::CONTEXT_LABEL,
++      views::style::STYLE_SECONDARY);
++  pin_hint->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++  pin_hint->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(0, region_horizontal_padding + 4, 10,
++                        region_horizontal_padding));
++  glint_pin_hint_ = AddChildView(std::move(pin_hint));
++
+   top_button_container_ =
+       AddChildView(std::make_unique<VerticalTabStripTopContainer>(
+           state_controller_, root_action_item, browser_view->browser()));
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index 86243a11d4..e93666b793 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -45,6 +45,7 @@ class VerticalTabStripStateController;
+ }  // namespace tabs
+ 
+ namespace views {
++class Label;
+ class ResizeArea;
+ class Separator;
+ class Textfield;
+@@ -250,6 +251,9 @@ class VerticalTabStripRegionView final
+   // Glint: address bar at the top of the sidebar (Arc/Glint style).
+   raw_ptr<views::Textfield> glint_address_bar_ = nullptr;
+   raw_ptr<Browser> glint_browser_ = nullptr;
++  // Glint: workspace header rows below the address bar.
++  raw_ptr<views::Label> glint_workspace_name_ = nullptr;
++  raw_ptr<views::Label> glint_pin_hint_ = nullptr;
+ 
+   // views::TextfieldController: navigate when the sidebar address bar submits.
+   bool HandleKeyEvent(views::Textfield* sender,

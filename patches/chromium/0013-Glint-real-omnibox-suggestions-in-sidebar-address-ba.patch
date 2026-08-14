@@ -1,0 +1,245 @@
+From bc110954b401d32d12c5bc387116153296ed63dc Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Mon, 6 Jul 2026 00:14:22 +0200
+Subject: [PATCH 13/60] Glint: real omnibox suggestions in sidebar address bar
+ (AutocompleteController + dropdown)
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 116 +++++++++++++++++-
+ .../frame/vertical_tab_strip_region_view.h    |  27 +++-
+ 2 files changed, 141 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index c0b7a25750..4eeb54d72c 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -13,6 +13,8 @@
+ #include "base/check_is_test.h"
+ #include "base/containers/adapters.h"
+ #include "base/functional/bind.h"
++#include "base/location.h"
++#include "base/task/single_thread_task_runner.h"
+ #include "base/i18n/number_formatting.h"
+ #include "base/i18n/rtl.h"
+ #include "base/metrics/histogram_functions.h"
+@@ -66,8 +68,20 @@
+ #include "ui/compositor/layer.h"
+ #include "ui/display/screen.h"
+ #include "ui/events/event.h"
++#include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
++#include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
++#include "chrome/browser/profiles/profile.h"
++#include "components/omnibox/browser/autocomplete_classifier.h"
++#include "components/omnibox/browser/autocomplete_controller_config.h"
++#include "components/omnibox/browser/autocomplete_enums.h"
++#include "components/omnibox/browser/autocomplete_input.h"
++#include "components/omnibox/browser/autocomplete_match.h"
++#include "components/omnibox/browser/autocomplete_result.h"
+ #include "components/vector_icons/vector_icons.h"
++#include "third_party/metrics_proto/omnibox_event.pb.h"
++#include "third_party/metrics_proto/omnibox_focus_type.pb.h"
+ #include "third_party/skia/include/core/SkColor.h"
++#include "ui/views/controls/button/label_button.h"
+ #include "ui/base/models/image_model.h"
+ #include "ui/gfx/geometry/size.h"
+ #include "ui/gfx/text_constants.h"
+@@ -171,6 +185,28 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   glint_address_bar_ = AddChildView(std::move(glint_address_bar));
+   UpdateGlintAddressBar();
+ 
++  // Glint: autocomplete suggestions dropdown, shown under the address bar while
++  // typing. Sits directly below the field in the vertical layout.
++  auto suggestions = std::make_unique<views::View>();
++  auto* suggestions_layout =
++      suggestions->SetLayoutManager(std::make_unique<views::FlexLayout>());
++  suggestions_layout->SetOrientation(views::LayoutOrientation::kVertical);
++  suggestions->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(0, region_horizontal_padding, 4,
++                        region_horizontal_padding));
++  suggestions->SetVisible(false);
++  glint_suggestions_ = AddChildView(std::move(suggestions));
++
++  // Autocomplete engine: same providers (history, search, bookmarks, ...) the
++  // real omnibox uses.
++  glint_autocomplete_ = std::make_unique<AutocompleteController>(
++      std::make_unique<ChromeAutocompleteProviderClient>(
++          glint_browser_->profile()),
++      AutocompleteControllerConfig{
++          .provider_types = AutocompleteClassifier::DefaultOmniboxProviders()});
++  glint_autocomplete_->AddObserver(this);
++
+   // Glint: workspace header row — folder icon + bold name (like the "Work"
+   // space in the reference).
+   auto workspace_row = std::make_unique<views::View>();
+@@ -1285,10 +1321,88 @@ bool VerticalTabStripRegionView::HandleKeyEvent(
+     url = GURL("https://www.google.com/search?q=" +
+                base::EscapeQueryParamValue(text, /*use_plus=*/true));
+   }
++  GlintOpenUrl(std::move(url));
++  return true;
++}
++
++void VerticalTabStripRegionView::ContentsChanged(
++    views::Textfield* sender,
++    const std::u16string& new_contents) {
++  // Only drive autocomplete for real user typing, not the programmatic URL sync
++  // in UpdateGlintAddressBar().
++  if (!glint_autocomplete_ || !glint_browser_ || !sender->HasFocus()) {
++    return;
++  }
++  if (new_contents.empty()) {
++    ClearGlintSuggestions();
++    return;
++  }
++  AutocompleteInput input(
++      new_contents, metrics::OmniboxEventProto::OTHER,
++      ChromeAutocompleteSchemeClassifier(glint_browser_->profile()));
++  input.set_focus_type(metrics::OmniboxFocusType::INTERACTION_DEFAULT);
++  glint_autocomplete_->Start(input);
++}
++
++void VerticalTabStripRegionView::OnResultChanged(
++    AutocompleteController* controller,
++    bool default_match_changed) {
++  if (!glint_suggestions_) {
++    return;
++  }
++  glint_suggestions_->RemoveAllChildViews();
++  int shown = 0;
++  for (const AutocompleteMatch& match : controller->result()) {
++    if (shown >= 6) {
++      break;
++    }
++    std::u16string label =
++        !match.contents.empty() ? match.contents : match.fill_into_edit;
++    if (label.empty() || !match.destination_url.is_valid()) {
++      continue;
++    }
++    auto row = std::make_unique<views::LabelButton>(
++        base::BindRepeating(&VerticalTabStripRegionView::GlintOpenUrl,
++                            base::Unretained(this), match.destination_url),
++        label);
++    row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    glint_suggestions_->AddChildView(std::move(row));
++    ++shown;
++  }
++  glint_suggestions_->SetVisible(shown > 0);
++  InvalidateLayout();
++}
++
++void VerticalTabStripRegionView::GlintOpenUrl(GURL url) {
++  if (!glint_browser_ || !url.is_valid()) {
++    return;
++  }
++  // Defer: this may be invoked from a suggestion row's click handler, and the
++  // work below deletes that row. Posting avoids a use-after-free.
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&VerticalTabStripRegionView::GlintNavigateAndClear,
++                     weak_ptr_factory_.GetWeakPtr(), std::move(url)));
++}
++
++void VerticalTabStripRegionView::GlintNavigateAndClear(GURL url) {
++  if (!glint_browser_ || !url.is_valid()) {
++    return;
++  }
++  ClearGlintSuggestions();
+   NavigateParams params(glint_browser_, url, ui::PAGE_TRANSITION_TYPED);
+   params.disposition = WindowOpenDisposition::CURRENT_TAB;
+   Navigate(&params);
+-  return true;
++}
++
++void VerticalTabStripRegionView::ClearGlintSuggestions() {
++  if (glint_autocomplete_) {
++    glint_autocomplete_->Stop(AutocompleteStopReason::kClobbered);
++  }
++  if (glint_suggestions_) {
++    glint_suggestions_->RemoveAllChildViews();
++    glint_suggestions_->SetVisible(false);
++  }
+ }
+ 
+ void VerticalTabStripRegionView::OnTabStripModelChanged(
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index e93666b793..a43ed2fde1 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -5,11 +5,13 @@
+ #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_VERTICAL_TAB_STRIP_REGION_VIEW_H_
+ #define CHROME_BROWSER_UI_VIEWS_FRAME_VERTICAL_TAB_STRIP_REGION_VIEW_H_
+ 
++#include <memory>
+ #include <optional>
+ 
+ #include "base/callback_list.h"
+ #include "base/containers/flat_set.h"
+ #include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
+ #include "base/scoped_observation.h"
+ #include "base/time/time.h"
+ #include "base/timer/timer.h"
+@@ -24,6 +26,7 @@
+ #include "chrome/browser/ui/views/tabs/hovercard/tab_hover_card_controller.h"
+ #include "chrome/browser/ui/views/tabs/shared/drop_arrow.h"
+ #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_strip_expand_on_hover_lock.h"
++#include "components/omnibox/browser/autocomplete_controller.h"
+ #include "components/tabs/public/tab_interface.h"
+ #include "ui/base/interaction/element_tracker.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
+@@ -36,6 +39,7 @@
+ 
+ class Browser;
+ class BrowserView;
++class GURL;
+ class VerticalTabStripTopContainer;
+ class VerticalTabStripBottomContainer;
+ class ShadowFrameView;
+@@ -62,6 +66,7 @@ class VerticalTabStripRegionView final
+       public tabs::VerticalTabStripStateController::Delegate,
+       public views::WidgetObserver,
+       public views::TextfieldController,
++      public AutocompleteController::Observer,
+       public TabStripModelObserver {
+   METADATA_HEADER(VerticalTabStripRegionView, BaseTabStripRegionView)
+ 
+@@ -254,10 +259,27 @@ class VerticalTabStripRegionView final
+   // Glint: workspace header rows below the address bar.
+   raw_ptr<views::Label> glint_workspace_name_ = nullptr;
+   raw_ptr<views::Label> glint_pin_hint_ = nullptr;
++  // Glint: omnibox autocomplete for the sidebar address bar.
++  std::unique_ptr<AutocompleteController> glint_autocomplete_;
++  raw_ptr<views::View> glint_suggestions_ = nullptr;
+ 
+-  // views::TextfieldController: navigate when the sidebar address bar submits.
++  // views::TextfieldController: navigate when the sidebar address bar submits,
++  // and drive autocomplete suggestions as the user types.
+   bool HandleKeyEvent(views::Textfield* sender,
+                       const ui::KeyEvent& key_event) override;
++  void ContentsChanged(views::Textfield* sender,
++                       const std::u16string& new_contents) override;
++
++  // AutocompleteController::Observer: rebuild the suggestions dropdown.
++  void OnResultChanged(AutocompleteController* controller,
++                       bool default_match_changed) override;
++  // Navigate to a chosen suggestion and dismiss the dropdown. Posts the actual
++  // work so a clicked suggestion row is never deleted from inside its own click
++  // handler.
++  void GlintOpenUrl(GURL url);
++  void GlintNavigateAndClear(GURL url);
++  // Tear down the suggestions dropdown and stop autocomplete.
++  void ClearGlintSuggestions();
+ 
+   // TabStripModelObserver: keep the sidebar address bar showing the active URL.
+   void OnTabStripModelChanged(
+@@ -331,6 +353,9 @@ class VerticalTabStripRegionView final
+   bool is_first_window_presentation_ = true;
+   base::ScopedObservation<views::Widget, views::WidgetObserver>
+       widget_observation_{this};
++
++  // Must be last so weak pointers are invalidated before other members die.
++  base::WeakPtrFactory<VerticalTabStripRegionView> weak_ptr_factory_{this};
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_VERTICAL_TAB_STRIP_REGION_VIEW_H_

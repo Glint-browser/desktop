@@ -1,0 +1,62 @@
+From 31bf74f830429531c6c97ac98d54defda08f5567 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Mon, 6 Jul 2026 18:25:32 +0200
+Subject: [PATCH 15/60] Glint: style suggestions popup (rounded card, hover
+ highlight, tight rows)
+
+---
+ .../frame/vertical_tab_strip_region_view.cc    | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index ff12a1dc85..b0ae514e5e 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -117,6 +117,10 @@
+ #include "ui/views/controls/separator.h"
+ #include "ui/views/focus/focus_manager.h"
+ #include "ui/views/interaction/element_tracker_views.h"
++#include "ui/views/animation/ink_drop.h"
++#include "ui/views/animation/ink_drop_host.h"
++#include "ui/views/border.h"
++#include "ui/views/controls/highlight_path_generator.h"
+ #include "ui/views/layout/box_layout.h"
+ #include "ui/views/layout/flex_layout.h"
+ #include "ui/views/layout/flex_layout_types.h"
+@@ -223,9 +227,13 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   auto* suggestions_layout =
+       suggestions->SetLayoutManager(std::make_unique<views::FlexLayout>());
+   suggestions_layout->SetOrientation(views::LayoutOrientation::kVertical);
++  suggestions_layout->SetInteriorMargin(gfx::Insets::VH(4, 4));
++  // Elevated rounded "popup" card behind the suggestion rows.
++  suggestions->SetBackground(views::CreateRoundedRectBackground(
++      SkColorSetRGB(0xff, 0xff, 0xff), 12.f));
+   suggestions->SetProperty(
+       views::kMarginsKey,
+-      gfx::Insets::TLBR(0, region_horizontal_padding, 4,
++      gfx::Insets::TLBR(2, region_horizontal_padding, 6,
+                         region_horizontal_padding));
+   suggestions->SetVisible(false);
+   glint_suggestions_ = AddChildView(std::move(suggestions));
+@@ -1433,6 +1441,12 @@ void VerticalTabStripRegionView::OnResultChanged(
+         ui::ImageModel::FromVectorIcon(match.GetVectorIcon(/*is_bookmark=*/false),
+                                        ui::kColorIcon, 16));
+     row->SetImageLabelSpacing(8);
++    // Tight, consistent row padding and a rounded highlight on hover.
++    row->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(6, 8)));
++    row->SetInstallFocusRingOnFocus(false);
++    views::InkDrop::Get(row.get())->SetMode(views::InkDropHost::InkDropMode::ON);
++    views::InkDrop::Get(row.get())->GetInkDrop()->SetShowHighlightOnHover(true);
++    views::InstallRoundRectHighlightPathGenerator(row.get(), gfx::Insets(), 8);
+     glint_suggestions_->AddChildView(std::move(row));
+     glint_suggestion_urls_.push_back(match.destination_url);
+   }
+@@ -1482,7 +1496,7 @@ void VerticalTabStripRegionView::UpdateGlintSuggestionHighlight() {
+   for (views::View* child : glint_suggestions_->children()) {
+     if (i == glint_selected_row_) {
+       child->SetBackground(views::CreateRoundedRectBackground(
+-          SkColorSetARGB(0x24, 0x7c, 0x5c, 0xff), 6.f));
++          SkColorSetARGB(0x24, 0x7c, 0x5c, 0xff), 8.f));
+     } else {
+       child->SetBackground(nullptr);
+     }

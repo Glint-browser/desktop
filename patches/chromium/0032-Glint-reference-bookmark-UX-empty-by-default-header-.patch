@@ -1,0 +1,186 @@
+From 94b41159f1d476f178081ff639e29de92e7c1533 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 15:25:18 +0200
+Subject: [PATCH 32/60] Glint: reference bookmark UX - empty by default, header
+ folder button creates folders, always-live tree
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 96 +++++++++----------
+ .../frame/vertical_tab_strip_region_view.h    |  9 +-
+ 2 files changed, 48 insertions(+), 57 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 29ecfcc1e5..7217dce01c 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -297,65 +297,60 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+                         region_horizontal_padding));
+   glint_pin_hint_ = AddChildView(std::move(pin_hint));
+ 
+-  // Glint: bold workspace name (e.g. "Personal"). No button here — the "New
+-  // Tab" row below is the sidebar's one, unambiguous new-tab affordance, so
+-  // this doesn't duplicate it.
+-  auto workspace_name = std::make_unique<views::Label>(
+-      u"Personal", views::style::CONTEXT_LABEL, views::style::STYLE_EMPHASIZED);
+-  workspace_name->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+-  workspace_name->SetProperty(
++  // Glint: workspace header — bold space name with a "new folder" button at
++  // the right edge (reference design).
++  auto workspace_row = std::make_unique<views::View>();
++  auto* workspace_box =
++      workspace_row->SetLayoutManager(std::make_unique<views::BoxLayout>(
++          views::BoxLayout::Orientation::kHorizontal));
++  workspace_box->set_cross_axis_alignment(
++      views::BoxLayout::CrossAxisAlignment::kCenter);
++  workspace_row->SetProperty(
+       views::kMarginsKey,
+       gfx::Insets::TLBR(6, region_horizontal_padding + 4, 2,
+                         region_horizontal_padding));
+-  glint_workspace_name_ = AddChildView(std::move(workspace_name));
+ 
+-  // Glint: bookmarks folder row (matches the reference sidebar). Opens the
+-  // bookmark manager in the current tab.
+-  auto bookmarks_row = std::make_unique<views::LabelButton>(
+-      base::BindRepeating(&VerticalTabStripRegionView::GlintToggleBookmarks,
+-                          base::Unretained(this)),
+-      u"Bookmark");
+-  bookmarks_row->SetImageModel(
++  auto workspace_name = std::make_unique<views::Label>(
++      u"Personal", views::style::CONTEXT_LABEL, views::style::STYLE_EMPHASIZED);
++  workspace_name->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++  glint_workspace_name_ = workspace_row->AddChildView(std::move(workspace_name));
++
++  auto new_folder_button = std::make_unique<views::ImageButton>(
++      base::BindRepeating(
++          &VerticalTabStripRegionView::GlintCreateBookmarkFolder,
++          base::Unretained(this)));
++  new_folder_button->SetImageModel(
+       views::Button::STATE_NORMAL,
+       ui::ImageModel::FromVectorIcon(vector_icons::kFolderFilledIcon,
+                                      ui::kColorIcon, 16));
+-  bookmarks_row->SetImageLabelSpacing(8);
+-  bookmarks_row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+-  bookmarks_row->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(4, 8)));
+-  bookmarks_row->SetInstallFocusRingOnFocus(false);
+-  views::InkDrop::Get(bookmarks_row.get())
+-      ->SetMode(views::InkDropHost::InkDropMode::ON);
+-  views::InkDrop::Get(bookmarks_row.get())
+-      ->GetInkDrop()
+-      ->SetShowHighlightOnHover(true);
+-  views::InstallRoundRectHighlightPathGenerator(bookmarks_row.get(),
+-                                                gfx::Insets(), 8);
+-  bookmarks_row->SetProperty(
+-      views::kMarginsKey,
+-      gfx::Insets::TLBR(2, region_horizontal_padding, 0,
+-                        region_horizontal_padding));
+-  AddChildView(std::move(bookmarks_row));
++  new_folder_button->SetTooltipText(u"New folder");
++  workspace_row->AddChildView(std::move(new_folder_button));
+ 
+-  // Glint: the list of bookmarks that expands under the folder row, indented
+-  // like folder contents. Populated on first expand.
++  // The label takes the remaining width, pushing the button to the right.
++  workspace_box->SetFlexForView(glint_workspace_name_, 1);
++  AddChildView(std::move(workspace_row));
++
++  // Glint: the bookmarks/folders tree. Empty (and hidden) by default — the
++  // header's folder button creates folders, which appear here as rows.
+   auto bookmarks_list = std::make_unique<views::View>();
+   auto* bookmarks_list_layout =
+       bookmarks_list->SetLayoutManager(std::make_unique<views::FlexLayout>());
+   bookmarks_list_layout->SetOrientation(views::LayoutOrientation::kVertical);
+   bookmarks_list->SetProperty(
+       views::kMarginsKey,
+-      gfx::Insets::TLBR(0, region_horizontal_padding + 12, 0,
++      gfx::Insets::TLBR(0, region_horizontal_padding, 0,
+                         region_horizontal_padding));
+   bookmarks_list->SetVisible(false);
+   glint_bookmarks_list_ = AddChildView(std::move(bookmarks_list));
+ 
+-  // Keep the list live: any bookmark change (star button, folder edits)
+-  // triggers a rebuild while the list is open.
++  // Keep the tree live: any bookmark change (star button, folder creation,
++  // removals) rebuilds it, including the initial model load.
+   if (bookmarks::BookmarkModel* bookmark_model =
+           BookmarkModelFactory::GetForBrowserContext(
+               glint_browser_->profile())) {
+     glint_bookmark_observation_.Observe(bookmark_model);
+   }
++  GlintRebuildBookmarksList();
+ 
+   // Glint: thin separator between the Bookmark row and the tab list, matching
+   // the reference sidebar.
+@@ -1533,17 +1528,17 @@ void VerticalTabStripRegionView::GlintAdoptOrphanTabs() {
+   }
+ }
+ 
+-void VerticalTabStripRegionView::GlintToggleBookmarks() {
+-  if (!glint_bookmarks_list_ || !glint_browser_) {
++void VerticalTabStripRegionView::GlintCreateBookmarkFolder() {
++  if (!glint_browser_) {
+     return;
+   }
+-  if (glint_bookmarks_list_->GetVisible()) {
+-    glint_bookmarks_list_->SetVisible(false);
+-    InvalidateLayout();
++  bookmarks::BookmarkModel* model =
++      BookmarkModelFactory::GetForBrowserContext(glint_browser_->profile());
++  if (!model || !model->loaded()) {
+     return;
+   }
+-  glint_bookmarks_list_->SetVisible(true);
+-  GlintRebuildBookmarksList();
++  model->AddFolder(model->bookmark_bar_node(), 0, u"New Folder");
++  // The model notification rebuilds the tree, making the folder appear.
+ }
+ 
+ void VerticalTabStripRegionView::GlintRebuildBookmarksList() {
+@@ -1558,13 +1553,8 @@ void VerticalTabStripRegionView::GlintRebuildBookmarksList() {
+     GlintAddBookmarkRows(model->bookmark_bar_node(), 0, row_budget);
+     GlintAddBookmarkRows(model->other_node(), 0, row_budget);
+   }
+-  if (row_budget == 40) {
+-    auto empty = std::make_unique<views::Label>(
+-        u"No bookmarks yet", views::style::CONTEXT_LABEL,
+-        views::style::STYLE_SECONDARY);
+-    empty->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+-    glint_bookmarks_list_->AddChildView(std::move(empty));
+-  }
++  // Empty by default: the tree only shows once folders/bookmarks exist.
++  glint_bookmarks_list_->SetVisible(row_budget < 40);
+   InvalidateLayout();
+ }
+ 
+@@ -1676,9 +1666,9 @@ void VerticalTabStripRegionView::GlintRemoveBookmark(int64_t node_id) {
+ }
+ 
+ void VerticalTabStripRegionView::BookmarkModelChanged() {
+-  if (!glint_bookmarks_list_ || !glint_bookmarks_list_->GetVisible()) {
+-    return;
+-  }
++  // Covers the initial model load and every later mutation (star, folder
++  // creation, removal). Deferred so rows are never deleted from inside their
++  // own event handlers.
+   base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+       FROM_HERE,
+       base::BindOnce(&VerticalTabStripRegionView::GlintRebuildBookmarksList,
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index e345826b86..fb96a76a62 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -317,10 +317,11 @@ class VerticalTabStripRegionView final
+   void GlintHandleNewTab();
+   // Opens a fresh foreground tab in the active space ("New Tab" row / "+").
+   void GlintNewTab();
+-  // Glint bookmarks: a live folder tree in the sidebar. The header row toggles
+-  // the list, folder rows expand/collapse, URL rows navigate, and each URL row
+-  // has a remove button. The list auto-refreshes on any bookmark change.
+-  void GlintToggleBookmarks();
++  // Glint bookmarks: a live folder tree in the sidebar, hidden while empty.
++  // The header's folder button creates folders, folder rows expand/collapse,
++  // URL rows navigate, and each URL row has a remove button. The tree
++  // auto-refreshes on any bookmark change.
++  void GlintCreateBookmarkFolder();
+   void GlintRebuildBookmarksList();
+   void GlintAddBookmarkRows(const bookmarks::BookmarkNode* folder,
+                             int depth,

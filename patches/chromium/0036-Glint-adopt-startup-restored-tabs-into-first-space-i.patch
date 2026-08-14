@@ -1,0 +1,71 @@
+From 06613d4db399789a029a682e20bbb740fe0585ea Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Thu, 23 Jul 2026 08:41:51 +0200
+Subject: [PATCH 36/60] Glint: adopt startup-restored tabs into first space
+ (insert-observer misses pre-construction inserts) + diagnostic logging for
+ space adoption/collapse
+
+---
+ .../frame/vertical_tab_strip_region_view.cc    | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 65c922163d..62335f0067 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -14,6 +14,7 @@
+ #include "base/containers/adapters.h"
+ #include "base/functional/bind.h"
+ #include "base/location.h"
++#include "base/logging.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/i18n/number_formatting.h"
+@@ -481,6 +482,14 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+       {u"Personal", SkColorSetRGB(0x6d, 0x5b, 0xd0), std::nullopt, nullptr});
+   GlintRebuildSpaceDots();
+ 
++  // Tabs restored at startup can be inserted before this view exists, so the
++  // insert-observer misses them. Adopt any such orphans shortly after
++  // construction so they belong to the first space from the start.
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE,
++      base::BindOnce(&VerticalTabStripRegionView::GlintHandleNewTab,
++                     weak_ptr_factory_.GetWeakPtr()));
++
+   resize_area_ = AddChildView(std::make_unique<views::ResizeArea>(this));
+   resize_area_->SetProperty(views::kViewIgnoredByLayoutKey, true);
+   resize_area_->SetFocusBehavior(views::View::FocusBehavior::ACCESSIBLE_ONLY);
+@@ -1563,14 +1572,19 @@ void VerticalTabStripRegionView::GlintAdoptOrphanTabs() {
+       orphans.push_back(i);
+     }
+   }
++  LOG(ERROR) << "GLINT adopt: tabs=" << tsm->count()
++             << " orphans=" << orphans.size()
++             << " active_space=" << glint_active_space_;
+   if (orphans.empty()) {
+     return;
+   }
+   const size_t space_index = static_cast<size_t>(glint_active_space_);
+   GlintSpace& space = glint_spaces_.at(space_index);
+   if (space.group && group_model->ContainsTabGroup(*space.group)) {
++    LOG(ERROR) << "GLINT adopt: adding to existing group";
+     tsm->AddToExistingGroup(orphans, *space.group);
+   } else {
++    LOG(ERROR) << "GLINT adopt: creating new group";
+     space.group = tsm->AddToNewGroup(orphans);
+     tsm->ChangeTabGroupVisuals(
+         *space.group,
+@@ -1980,8 +1994,12 @@ void VerticalTabStripRegionView::GlintSwitchSpace(int space_index) {
+   for (size_t i = 0; i < glint_spaces_.size(); ++i) {
+     const GlintSpace& space = glint_spaces_.at(i);
+     if (!space.group || !group_model->ContainsTabGroup(*space.group)) {
++      LOG(ERROR) << "GLINT switch: space " << i << " has no live group";
+       continue;
+     }
++    LOG(ERROR) << "GLINT switch: space " << i
++               << (i == new_space ? " expand" : " collapse") << " tabs="
++               << group_model->GetTabGroup(*space.group)->ListTabs().length();
+     tsm->ChangeTabGroupVisuals(
+         *space.group,
+         tab_groups::TabGroupVisualData(space.name, GlintGroupColorForSpace(i),

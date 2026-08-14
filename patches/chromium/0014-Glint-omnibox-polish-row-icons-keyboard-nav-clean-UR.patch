@@ -1,0 +1,267 @@
+From 63d7c7718f8ccae554fc1ccfad625bf6c2373ed6 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Mon, 6 Jul 2026 18:15:11 +0200
+Subject: [PATCH 14/60] Glint: omnibox polish - row icons, keyboard nav, clean
+ URL display, copy-link button
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 133 ++++++++++++++++--
+ .../frame/vertical_tab_strip_region_view.h    |  12 ++
+ 2 files changed, 131 insertions(+), 14 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 4eeb54d72c..ff12a1dc85 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -81,9 +81,13 @@
+ #include "third_party/metrics_proto/omnibox_event.pb.h"
+ #include "third_party/metrics_proto/omnibox_focus_type.pb.h"
+ #include "third_party/skia/include/core/SkColor.h"
++#include "ui/base/clipboard/clipboard_buffer.h"
++#include "ui/base/clipboard/scoped_clipboard_writer.h"
++#include "ui/views/controls/button/image_button.h"
+ #include "ui/views/controls/button/label_button.h"
+ #include "ui/base/models/image_model.h"
+ #include "ui/gfx/geometry/size.h"
++#include "ui/gfx/range/range.h"
+ #include "ui/gfx/text_constants.h"
+ #include "ui/views/controls/image_view.h"
+ #include "ui/views/controls/label.h"
+@@ -96,6 +100,7 @@
+ #include "chrome/browser/ui/navigator/browser_navigator.h"
+ #include "chrome/browser/ui/navigator/browser_navigator_params.h"
+ #include "components/url_formatter/url_fixer.h"
++#include "components/url_formatter/url_formatter.h"
+ #include "ui/base/page_transition_types.h"
+ #include "ui/base/window_open_disposition.h"
+ #include "ui/events/keycodes/keyboard_codes.h"
+@@ -112,6 +117,7 @@
+ #include "ui/views/controls/separator.h"
+ #include "ui/views/focus/focus_manager.h"
+ #include "ui/views/interaction/element_tracker_views.h"
++#include "ui/views/layout/box_layout.h"
+ #include "ui/views/layout/flex_layout.h"
+ #include "ui/views/layout/flex_layout_types.h"
+ #include "ui/views/layout/layout_types.h"
+@@ -174,15 +180,41 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   // first so it sits above the tab controls in the vertical layout.
+   glint_browser_ = browser_view->browser();
+   glint_browser_->tab_strip_model()->AddObserver(this);
+-  auto glint_address_bar = std::make_unique<views::Textfield>();
+-  glint_address_bar->SetPlaceholderText(u"Search or enter address");
+-  glint_address_bar->set_controller(this);
++
++  // Address bar row: the text field plus a trailing "copy link" button.
++  // BoxLayout keeps the row at the text field's natural height (the field
++  // flexes to fill width; the button stays fixed).
++  auto address_row = std::make_unique<views::View>();
++  auto* address_box =
++      address_row->SetLayoutManager(std::make_unique<views::BoxLayout>(
++          views::BoxLayout::Orientation::kHorizontal));
++  address_box->set_cross_axis_alignment(
++      views::BoxLayout::CrossAxisAlignment::kCenter);
++  address_box->set_between_child_spacing(4);
+   // Top margin clears the macOS traffic-light window controls.
+-  glint_address_bar->SetProperty(
++  address_row->SetProperty(
+       views::kMarginsKey,
+       gfx::Insets::TLBR(34, region_horizontal_padding, region_horizontal_padding,
+                         region_horizontal_padding));
+-  glint_address_bar_ = AddChildView(std::move(glint_address_bar));
++
++  auto glint_address_bar = std::make_unique<views::Textfield>();
++  glint_address_bar->SetPlaceholderText(u"Search or enter address");
++  glint_address_bar->set_controller(this);
++  glint_address_bar_ = address_row->AddChildView(std::move(glint_address_bar));
++
++  auto copy_button = std::make_unique<views::ImageButton>(base::BindRepeating(
++      &VerticalTabStripRegionView::GlintCopyUrl, base::Unretained(this)));
++  copy_button->SetImageModel(
++      views::Button::STATE_NORMAL,
++      ui::ImageModel::FromVectorIcon(vector_icons::kContentCopyIcon,
++                                     ui::kColorIcon, 16));
++  copy_button->SetTooltipText(u"Copy link");
++  address_row->AddChildView(std::move(copy_button));
++
++  // The text field takes the remaining width; the button keeps its size.
++  address_box->SetFlexForView(glint_address_bar_, 1);
++
++  AddChildView(std::move(address_row));
+   UpdateGlintAddressBar();
+ 
+   // Glint: autocomplete suggestions dropdown, shown under the address bar while
+@@ -1305,11 +1337,39 @@ void VerticalTabStripRegionView::OnActiveTabChanged(
+ bool VerticalTabStripRegionView::HandleKeyEvent(
+     views::Textfield* sender,
+     const ui::KeyEvent& key_event) {
+-  // Glint: pressing Enter in the sidebar address bar navigates the active tab.
+-  if (key_event.type() != ui::EventType::kKeyPressed ||
+-      key_event.key_code() != ui::VKEY_RETURN) {
++  if (key_event.type() != ui::EventType::kKeyPressed) {
++    return false;
++  }
++  const int suggestion_count = static_cast<int>(glint_suggestion_urls_.size());
++  const bool have_suggestions =
++      glint_suggestions_ && glint_suggestions_->GetVisible() &&
++      suggestion_count > 0;
++
++  // Glint: arrow keys move the highlight through the suggestions dropdown.
++  if (have_suggestions && key_event.key_code() == ui::VKEY_DOWN) {
++    glint_selected_row_ = std::min(glint_selected_row_ + 1, suggestion_count - 1);
++    UpdateGlintSuggestionHighlight();
++    return true;
++  }
++  if (have_suggestions && key_event.key_code() == ui::VKEY_UP) {
++    glint_selected_row_ = std::max(glint_selected_row_ - 1, -1);
++    UpdateGlintSuggestionHighlight();
++    return true;
++  }
++  if (have_suggestions && key_event.key_code() == ui::VKEY_ESCAPE) {
++    ClearGlintSuggestions();
++    return true;
++  }
++
++  // Glint: pressing Enter navigates the active tab.
++  if (key_event.key_code() != ui::VKEY_RETURN) {
+     return false;
+   }
++  // If a suggestion is highlighted, open it directly.
++  if (glint_selected_row_ >= 0 && glint_selected_row_ < suggestion_count) {
++    GlintOpenUrl(glint_suggestion_urls_.at(glint_selected_row_));
++    return true;
++  }
+   const std::string text = base::UTF16ToUTF8(sender->GetText());
+   if (text.empty() || !glint_browser_) {
+     return false;
+@@ -1351,9 +1411,10 @@ void VerticalTabStripRegionView::OnResultChanged(
+     return;
+   }
+   glint_suggestions_->RemoveAllChildViews();
+-  int shown = 0;
++  glint_suggestion_urls_.clear();
++  glint_selected_row_ = -1;
+   for (const AutocompleteMatch& match : controller->result()) {
+-    if (shown >= 6) {
++    if (glint_suggestion_urls_.size() >= 6) {
+       break;
+     }
+     std::u16string label =
+@@ -1366,10 +1427,16 @@ void VerticalTabStripRegionView::OnResultChanged(
+                             base::Unretained(this), match.destination_url),
+         label);
+     row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    // Leading icon: search glyph for queries, page/history glyph for URLs.
++    row->SetImageModel(
++        views::Button::STATE_NORMAL,
++        ui::ImageModel::FromVectorIcon(match.GetVectorIcon(/*is_bookmark=*/false),
++                                       ui::kColorIcon, 16));
++    row->SetImageLabelSpacing(8);
+     glint_suggestions_->AddChildView(std::move(row));
+-    ++shown;
++    glint_suggestion_urls_.push_back(match.destination_url);
+   }
+-  glint_suggestions_->SetVisible(shown > 0);
++  glint_suggestions_->SetVisible(!glint_suggestion_urls_.empty());
+   InvalidateLayout();
+ }
+ 
+@@ -1399,12 +1466,44 @@ void VerticalTabStripRegionView::ClearGlintSuggestions() {
+   if (glint_autocomplete_) {
+     glint_autocomplete_->Stop(AutocompleteStopReason::kClobbered);
+   }
++  glint_suggestion_urls_.clear();
++  glint_selected_row_ = -1;
+   if (glint_suggestions_) {
+     glint_suggestions_->RemoveAllChildViews();
+     glint_suggestions_->SetVisible(false);
+   }
+ }
+ 
++void VerticalTabStripRegionView::UpdateGlintSuggestionHighlight() {
++  if (!glint_suggestions_) {
++    return;
++  }
++  int i = 0;
++  for (views::View* child : glint_suggestions_->children()) {
++    if (i == glint_selected_row_) {
++      child->SetBackground(views::CreateRoundedRectBackground(
++          SkColorSetARGB(0x24, 0x7c, 0x5c, 0xff), 6.f));
++    } else {
++      child->SetBackground(nullptr);
++    }
++    ++i;
++  }
++}
++
++void VerticalTabStripRegionView::GlintCopyUrl() {
++  if (!glint_browser_) {
++    return;
++  }
++  content::WebContents* wc =
++      glint_browser_->tab_strip_model()->GetActiveWebContents();
++  const GURL url = wc ? wc->GetVisibleURL() : GURL();
++  if (!url.is_valid()) {
++    return;
++  }
++  ui::ScopedClipboardWriter writer(ui::ClipboardBuffer::kCopyPaste);
++  writer.WriteText(base::UTF8ToUTF16(url.spec()));
++}
++
+ void VerticalTabStripRegionView::OnTabStripModelChanged(
+     TabStripModel* tab_strip_model,
+     const TabStripModelChange& change,
+@@ -1429,9 +1528,15 @@ void VerticalTabStripRegionView::UpdateGlintAddressBar() {
+   const GURL url = wc ? wc->GetVisibleURL() : GURL();
+   if (!url.is_valid() || url.IsAboutBlank() || url.SchemeIs("chrome")) {
+     glint_address_bar_->SetText(std::u16string());
+-  } else {
+-    glint_address_bar_->SetText(base::UTF8ToUTF16(url.spec()));
++    return;
+   }
++  // Clean display: strip http/https and the trailing slash (e.g. "github.com").
++  glint_address_bar_->SetText(url_formatter::FormatUrl(
++      url,
++      url_formatter::kFormatUrlOmitDefaults | url_formatter::kFormatUrlOmitHTTPS,
++      base::UnescapeRule::SPACES, nullptr, nullptr, nullptr));
++  // Show the host at the start rather than scrolling to the URL's tail.
++  glint_address_bar_->SetSelectedRange(gfx::Range(0));
+ }
+ 
+ BEGIN_METADATA(VerticalTabStripRegionView)
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index a43ed2fde1..480b3e00ca 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -7,6 +7,9 @@
+ 
+ #include <memory>
+ #include <optional>
++#include <vector>
++
++#include "url/gurl.h"
+ 
+ #include "base/callback_list.h"
+ #include "base/containers/flat_set.h"
+@@ -262,6 +265,11 @@ class VerticalTabStripRegionView final
+   // Glint: omnibox autocomplete for the sidebar address bar.
+   std::unique_ptr<AutocompleteController> glint_autocomplete_;
+   raw_ptr<views::View> glint_suggestions_ = nullptr;
++  // Destination URLs for the current suggestion rows, parallel to the child
++  // rows in |glint_suggestions_|. Drives keyboard selection.
++  std::vector<GURL> glint_suggestion_urls_;
++  // Currently keyboard-highlighted suggestion row, or -1 for none.
++  int glint_selected_row_ = -1;
+ 
+   // views::TextfieldController: navigate when the sidebar address bar submits,
+   // and drive autocomplete suggestions as the user types.
+@@ -280,6 +288,10 @@ class VerticalTabStripRegionView final
+   void GlintNavigateAndClear(GURL url);
+   // Tear down the suggestions dropdown and stop autocomplete.
+   void ClearGlintSuggestions();
++  // Repaint the suggestion rows so the keyboard-selected one is highlighted.
++  void UpdateGlintSuggestionHighlight();
++  // Copy the active tab's URL to the clipboard (address bar copy button).
++  void GlintCopyUrl();
+ 
+   // TabStripModelObserver: keep the sidebar address bar showing the active URL.
+   void OnTabStripModelChanged(

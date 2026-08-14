@@ -1,0 +1,132 @@
+From 847d908c0dd1777e357d55801cdc06b441342054 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Sun, 5 Jul 2026 23:14:16 +0200
+Subject: [PATCH 08/60] Glint: address bar in the sidebar top (Arc-style),
+ navigates on Enter
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 50 +++++++++++++++++++
+ .../frame/vertical_tab_strip_region_view.h    | 13 ++++-
+ 2 files changed, 62 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 388f69da55..cd5dd71b82 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -65,6 +65,18 @@
+ #include "ui/compositor/layer.h"
+ #include "ui/display/screen.h"
+ #include "ui/events/event.h"
++#include "ui/views/controls/textfield/textfield.h"
++// Glint: sidebar address bar navigation.
++#include "base/strings/escape.h"
++#include "base/strings/utf_string_conversions.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/navigator/browser_navigator.h"
++#include "chrome/browser/ui/navigator/browser_navigator_params.h"
++#include "components/url_formatter/url_fixer.h"
++#include "ui/base/page_transition_types.h"
++#include "ui/base/window_open_disposition.h"
++#include "ui/events/keycodes/keyboard_codes.h"
++#include "url/gurl.h"
+ #include "ui/gfx/geometry/point.h"
+ #include "ui/views/background.h"
+ #include "ui/views/controls/button/label_button.h"
+@@ -132,6 +144,19 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+       0));
+ 
+   // Create child views.
++  // Glint: address bar at the very top of the sidebar (Arc/Glint style). Added
++  // first so it sits above the tab controls in the vertical layout.
++  glint_browser_ = browser_view->browser();
++  auto glint_address_bar = std::make_unique<views::Textfield>();
++  glint_address_bar->SetPlaceholderText(u"Search or enter address");
++  glint_address_bar->set_controller(this);
++  // Top margin clears the macOS traffic-light window controls.
++  glint_address_bar->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(34, region_horizontal_padding, region_horizontal_padding,
++                        region_horizontal_padding));
++  glint_address_bar_ = AddChildView(std::move(glint_address_bar));
++
+   top_button_container_ =
+       AddChildView(std::make_unique<VerticalTabStripTopContainer>(
+           state_controller_, root_action_item, browser_view->browser()));
+@@ -1148,5 +1173,30 @@ void VerticalTabStripRegionView::OnActiveTabChanged(
+   }
+ }
+ 
++bool VerticalTabStripRegionView::HandleKeyEvent(
++    views::Textfield* sender,
++    const ui::KeyEvent& key_event) {
++  // Glint: pressing Enter in the sidebar address bar navigates the active tab.
++  if (key_event.type() != ui::EventType::kKeyPressed ||
++      key_event.key_code() != ui::VKEY_RETURN) {
++    return false;
++  }
++  const std::string text = base::UTF16ToUTF8(sender->GetText());
++  if (text.empty() || !glint_browser_) {
++    return false;
++  }
++  GURL url = url_formatter::FixupURL(text, std::string());
++  // If it doesn't resolve to a real host (e.g. no dot), treat it as a search.
++  if (!url.is_valid() || !url.has_host() ||
++      url.host().find('.') == std::string::npos) {
++    url = GURL("https://www.google.com/search?q=" +
++               base::EscapeQueryParamValue(text, /*use_plus=*/true));
++  }
++  NavigateParams params(glint_browser_, url, ui::PAGE_TRANSITION_TYPED);
++  params.disposition = WindowOpenDisposition::CURRENT_TAB;
++  Navigate(&params);
++  return true;
++}
++
+ BEGIN_METADATA(VerticalTabStripRegionView)
+ END_METADATA
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index 5d035b9eea..1e2467efe6 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -30,8 +30,10 @@
+ #include "ui/gfx/geometry/point.h"
+ #include "ui/views/accessible_pane_view.h"
+ #include "ui/views/controls/resize_area_delegate.h"
++#include "ui/views/controls/textfield/textfield_controller.h"
+ #include "ui/views/focus/focus_manager.h"
+ 
++class Browser;
+ class BrowserView;
+ class VerticalTabStripTopContainer;
+ class VerticalTabStripBottomContainer;
+@@ -44,6 +46,7 @@ class VerticalTabStripStateController;
+ namespace views {
+ class ResizeArea;
+ class Separator;
++class Textfield;
+ class View;
+ class FlexLayout;
+ }  // namespace views
+@@ -55,7 +58,8 @@ class VerticalTabStripRegionView final
+       public views::ResizeAreaDelegate,
+       public OmniboxTabHelper::Observer,
+       public tabs::VerticalTabStripStateController::Delegate,
+-      public views::WidgetObserver {
++      public views::WidgetObserver,
++      public views::TextfieldController {
+   METADATA_HEADER(VerticalTabStripRegionView, BaseTabStripRegionView)
+ 
+  public:
+@@ -241,6 +245,13 @@ class VerticalTabStripRegionView final
+   void OnActiveTabChanged(const tabs::TabInterface* active_tab);
+ 
+   raw_ptr<VerticalTabStripTopContainer> top_button_container_ = nullptr;
++  // Glint: address bar at the top of the sidebar (Arc/Glint style).
++  raw_ptr<views::Textfield> glint_address_bar_ = nullptr;
++  raw_ptr<Browser> glint_browser_ = nullptr;
++
++  // views::TextfieldController: navigate when the sidebar address bar submits.
++  bool HandleKeyEvent(views::Textfield* sender,
++                      const ui::KeyEvent& key_event) override;
+   raw_ptr<views::Separator> top_button_separator_ = nullptr;
+   raw_ptr<VerticalTabStripBottomContainer> bottom_button_container_ = nullptr;
+   raw_ptr<views::View> gemini_button_ = nullptr;

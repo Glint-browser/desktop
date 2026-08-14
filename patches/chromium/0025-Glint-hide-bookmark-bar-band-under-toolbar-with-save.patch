@@ -1,0 +1,44 @@
+From b75fafb717bba0f9eb34747c79c536d5b6ef8073 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 10:10:14 +0200
+Subject: [PATCH 25/60] Glint: hide bookmark bar (band under toolbar with
+ saved-groups grid button) + frame-gray toolbar strip
+
+---
+ chrome/browser/ui/views/frame/browser_view.cc   | 5 +++++
+ chrome/browser/ui/views/toolbar/toolbar_view.cc | 4 +++-
+ 2 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/ui/views/frame/browser_view.cc b/chrome/browser/ui/views/frame/browser_view.cc
+index da4d28fe85..900752b741 100644
+--- a/chrome/browser/ui/views/frame/browser_view.cc
++++ b/chrome/browser/ui/views/frame/browser_view.cc
+@@ -2918,6 +2918,11 @@ void BrowserView::MaybeShowReadingListInSidePanelIPH() {
+ }
+ 
+ bool BrowserView::IsBookmarkBarVisible() const {
++  // Glint: bookmarks live in the sidebar's Bookmark folder; the horizontal
++  // bookmark bar (including its forced appearance on the NTP) never shows.
++  if (browser_->is_type_normal()) {
++    return false;
++  }
+   if (!browser_->SupportsWindowFeature(
+           Browser::WindowFeature::kFeatureBookmarkBar)) {
+     return false;
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+index f4239c9bad..b903159117 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -346,9 +346,11 @@ void ToolbarView::Init() {
+   }
+ 
+   if (display_mode_ == DisplayMode::kNormal) {
++    // Glint: the top strip paints the frame gray so it reads as one surface
++    // with the sidebar (reference design).
+     SetBackground(std::make_unique<CustomCornersBackground>(
+         *this, *browser_view_,
+-        /*primary_color=*/CustomCornersBackground::ToolbarTheme(),
++        /*primary_color=*/CustomCornersBackground::FrameTheme(),
+         /*corner_color=*/CustomCornersBackground::FrameTheme()));
+   } else if (display_mode_ == DisplayMode::kCustomTab) {
+     custom_tab_bar_ =

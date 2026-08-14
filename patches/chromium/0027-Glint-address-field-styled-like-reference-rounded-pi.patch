@@ -1,0 +1,54 @@
+From 2f4f906223947f90e8b05f576fe3ce11a1484654 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 13:37:00 +0200
+Subject: [PATCH 27/60] Glint: address field styled like reference - rounded
+ pill row, borderless textfield, copy + bookmark star inside
+
+---
+ .../frame/vertical_tab_strip_region_view.cc   | 22 ++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index ef1dde72d3..55c7261387 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -215,10 +215,19 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+       views::kMarginsKey,
+       gfx::Insets::TLBR(6, region_horizontal_padding, region_horizontal_padding,
+                         region_horizontal_padding));
++  // The row itself renders as the field (reference design): a rounded
++  // textfield-colored pill with the borderless text input and the trailing
++  // icons all inside it.
++  address_row->SetBackground(views::CreateRoundedRectBackground(
++      ui::kColorTextfieldBackground, 8.f));
++  address_row->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(2, 6)));
+ 
+   auto glint_address_bar = std::make_unique<views::Textfield>();
+   glint_address_bar->SetPlaceholderText(u"Search or enter address");
+   glint_address_bar->set_controller(this);
++  // Borderless, like the real omnibox's textfield inside its pill.
++  glint_address_bar->SetBorder(
++      views::CreateEmptyBorder(gfx::Insets::VH(4, 2)));
+   glint_address_bar_ = address_row->AddChildView(std::move(glint_address_bar));
+ 
+   auto copy_button = std::make_unique<views::ImageButton>(base::BindRepeating(
+@@ -230,7 +239,18 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   copy_button->SetTooltipText(u"Copy link");
+   address_row->AddChildView(std::move(copy_button));
+ 
+-  // The text field takes the remaining width; the button keeps its size.
++  // Star: bookmark the current tab, like the reference field's trailing star.
++  auto star_button = std::make_unique<views::ImageButton>(base::BindRepeating(
++      &chrome::BookmarkCurrentTab,
++      base::Unretained(
++          static_cast<BrowserWindowInterface*>(glint_browser_.get()))));
++  star_button->SetImageModel(
++      views::Button::STATE_NORMAL,
++      ui::ImageModel::FromVectorIcon(kStarIcon, ui::kColorIcon, 16));
++  star_button->SetTooltipText(u"Bookmark this tab");
++  address_row->AddChildView(std::move(star_button));
++
++  // The text field takes the remaining width; the buttons keep their size.
+   address_box->SetFlexForView(glint_address_bar_, 1);
+ 
+   AddChildView(std::move(address_row));

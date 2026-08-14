@@ -1,0 +1,549 @@
+From 9b7786b06b9dcf4e5f89a8e951cb5e90ddb6af19 Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Wed, 12 Aug 2026 09:33:03 +0200
+Subject: [PATCH 39/60] =?UTF-8?q?Glint:=20web-UI=20sidebar=20architecture?=
+ =?UTF-8?q?=20=E2=80=94=20the=20Glint=20UI=20extension=20side=20panel=20IS?=
+ =?UTF-8?q?=20the=20sidebar?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- No native tab strip (GetTabStripType -> kNone); layout styling, frame-gray
+  continuity and rounded content card (12px, equal 10px margins) preserved
+  under the new mode; content shadow box disabled (panel is permanent chrome)
+- Chromeless side panel: no header/border/card corners, slim resize gutter,
+  180px min width, auto-opens for the Glint UI extension per window
+- Frame + side-panel colors pinned to the Glint gray in the color mixer
+- Toolbar: sidebar toggle button, hidden pinned actions, 14px icons, empty
+  strip drags the window (incl. the omnibox-slot spacer), close-side-panel
+  affordance suppressed
+- A normal window survives its last tab closing (blank workspace state)
+---
+ chrome/browser/ui/browser.cc                  |  6 +++
+ chrome/browser/ui/color/chrome_color_mixer.cc | 14 ++++++
+ chrome/browser/ui/layout_constants.cc         |  4 +-
+ .../extensions/extensions_toolbar_desktop.cc  | 11 ++---
+ chrome/browser/ui/views/frame/browser_view.cc | 20 ++++++++-
+ .../ui/views/frame/contents_container_view.cc |  7 +--
+ .../layout/browser_view_tabbed_layout_impl.cc | 39 +++++++++-------
+ .../frame/main_background_region_view.cc      |  5 ++-
+ .../ui/views/frame/multi_contents_view.cc     |  9 ++--
+ .../extension_side_panel_coordinator.cc       | 23 ++++++++++
+ .../extension_side_panel_coordinator.h        |  4 ++
+ .../browser/ui/views/side_panel/side_panel.cc | 38 +++++++---------
+ .../browser/ui/views/toolbar/toolbar_view.cc  | 44 +++++++++++++++++++
+ .../browser/ui/views/toolbar/toolbar_view.h   |  6 +++
+ 14 files changed, 175 insertions(+), 55 deletions(-)
+
+diff --git a/chrome/browser/ui/browser.cc b/chrome/browser/ui/browser.cc
+index 23bf42cee4..f5d41557a0 100644
+--- a/chrome/browser/ui/browser.cc
++++ b/chrome/browser/ui/browser.cc
+@@ -1164,6 +1164,12 @@ void Browser::OnTabStripModelChanged(TabStripModel* tab_strip_model,
+ 
+ 
+ void Browser::TabStripEmpty() {
++  // Glint: a normal browser window survives its last tab (Arc-style) — the
++  // content area goes blank and the workspaces live on in the sidebar.
++  // Popups/apps keep the stock behavior.
++  if (is_type_normal()) {
++    return;
++  }
+   // Note: even though the tab strip is empty, the call to Close() may not
+   // result in closing this Browser. This can happen in the case of closing
+   // the last Browser with ongoing downloads.
+diff --git a/chrome/browser/ui/color/chrome_color_mixer.cc b/chrome/browser/ui/color/chrome_color_mixer.cc
+index 480f3bad70..1790363174 100644
+--- a/chrome/browser/ui/color/chrome_color_mixer.cc
++++ b/chrome/browser/ui/color/chrome_color_mixer.cc
+@@ -1127,6 +1127,20 @@ void AddChromeColorMixer(ui::ColorProvider* provider,
+   mixer[kColorReadAnythingFullPageScrollbarLowContrastDark] = {
+       SkColorSetRGB(0xC7, 0xC7, 0xC7)};
+ 
++  // Glint: pin the frame color to the exact Glint chrome gray so the top
++  // strip, the traffic-light zone and the web sidebar (chromium-ui panel CSS
++  // --panel-bg) are pixel-identical surfaces.
++  {
++    const SkColor glint_frame = dark_mode ? SkColorSetRGB(0x1B, 0x19, 0x22)
++                                          : SkColorSetRGB(0xF0, 0xEF, 0xF4);
++    mixer[ui::kColorFrameActive] = {glint_frame};
++    mixer[ui::kColorFrameInactive] = {glint_frame};
++    // The side panel hosts the Glint sidebar: its native container must be
++    // the same gray, or white slivers show around the panel content (resize
++    // gutter, load flashes).
++    mixer[kColorSidePanelBackground] = {glint_frame};
++  }
++
+   // Apply high contrast recipes if necessary.
+   if (!ShouldApplyHighContrastColors(key)) {
+     return;
+diff --git a/chrome/browser/ui/layout_constants.cc b/chrome/browser/ui/layout_constants.cc
+index 95dbdfc58d..65773fcc09 100644
+--- a/chrome/browser/ui/layout_constants.cc
++++ b/chrome/browser/ui/layout_constants.cc
+@@ -117,8 +117,10 @@ int GetLayoutConstant(LayoutConstant constant) {
+     case LayoutConstant::kToolbarButtonHeight:
+       return touch_ui ? 48 : 34;
+     case LayoutConstant::kToolbarButtonIconSize:
++      // Glint: toolbar icons 2px smaller than stock (16 → 14) — a subtler,
++      // airier top strip.
+       return touch_ui ? kDefaultTouchableIconSize
+-                      : kDefaultIconSizeChromeRefresh;
++                      : kDefaultIconSizeChromeRefresh - 2;
+     case LayoutConstant::kToolbarDividerCornerRadius:
+       return 1;
+     case LayoutConstant::kToolbarDividerHeight:
+diff --git a/chrome/browser/ui/views/extensions/extensions_toolbar_desktop.cc b/chrome/browser/ui/views/extensions/extensions_toolbar_desktop.cc
+index ed070ae05e..94825d5141 100644
+--- a/chrome/browser/ui/views/extensions/extensions_toolbar_desktop.cc
++++ b/chrome/browser/ui/views/extensions/extensions_toolbar_desktop.cc
+@@ -1047,13 +1047,10 @@ void ExtensionsToolbarDesktop::OnMenuClosed() {
+ }
+ 
+ void ExtensionsToolbarDesktop::UpdateSidePanelState(bool is_active) {
+-  close_side_panel_button_->SetVisible(is_active);
+-  if (is_active) {
+-    close_side_panel_button_anchor_highlight_ =
+-        close_side_panel_button_->AddAnchorHighlight();
+-  } else {
+-    close_side_panel_button_anchor_highlight_.reset();
+-  }
++  // Glint: the sidebar (an extension side panel) is a permanent fixture —
++  // never surface the toolbar's "close side panel" affordance for it.
++  close_side_panel_button_->SetVisible(false);
++  close_side_panel_button_anchor_highlight_.reset();
+ }
+ 
+ void ExtensionsToolbarDesktop::MovePinnedAction(
+diff --git a/chrome/browser/ui/views/frame/browser_view.cc b/chrome/browser/ui/views/frame/browser_view.cc
+index 900752b741..bad46c1fb6 100644
+--- a/chrome/browser/ui/views/frame/browser_view.cc
++++ b/chrome/browser/ui/views/frame/browser_view.cc
+@@ -4591,6 +4591,19 @@ int BrowserView::NonClientHitTest(const gfx::Point& point) {
+     }
+   }
+ 
++  // Glint: with no native tab strip (web-UI sidebar mode) the strip-gated
++  // branches below never run, leaving the top strip without any caption
++  // area — the window could not be dragged at all. Test the top container
++  // unconditionally; empty strip space (incl. the omnibox-slot spacer)
++  // drags the window, interactive controls still win.
++  {
++    gfx::Point glint_caption_point(point);
++    if (ConvertedHitTest(parent(), top_container_, &glint_caption_point) &&
++        top_container_->IsPositionInWindowCaption(glint_caption_point)) {
++      return HTCAPTION;
++    }
++  }
++
+   if (vertical_tab_strip_region_view_ &&
+       vertical_tab_strip_region_view_->GetVisible()) {
+     // See if the mouse pointer is within the bounds of the
+@@ -5921,7 +5934,12 @@ void BrowserView::FrameColorsChanged() {
+     web_app_window_title_->SetBackgroundColor(frame_color);
+     web_app_window_title_->SetEnabledColor(caption_color);
+   }
+-  GetWidget()->SetBackgroundColor(kColorToolbar);
++  // Glint: with the glass frame enabled the widget background must be
++  // transparent — an opaque fill here covers the window's glass material and
++  // blocks it everywhere (the sidebar stayed solid gray at "Clear").
++  GetWidget()->SetBackgroundColor(features::IsGlassFrameEnabled()
++                                      ? SK_ColorTRANSPARENT
++                                      : ui::kColorFrameActive);
+ }
+ 
+ void BrowserView::UpdateAccessibleNameForAllTabs() {
+diff --git a/chrome/browser/ui/views/frame/contents_container_view.cc b/chrome/browser/ui/views/frame/contents_container_view.cc
+index 8b54a922aa..0d79443f70 100644
+--- a/chrome/browser/ui/views/frame/contents_container_view.cc
++++ b/chrome/browser/ui/views/frame/contents_container_view.cc
+@@ -675,9 +675,10 @@ views::ProposedLayout ContentsContainerView::CalculateProposedLayout(
+   }
+ 
+   auto* const content_layout = layouts.GetLayoutFor(contents_view_);
+-  // Glint: thin light margin on the right and bottom of the web content, like
+-  // the reference design (left is the sidebar, top is the toolbar strip).
+-  content_layout->bounds.Inset(gfx::Insets::TLBR(0, 0, 10, 10));
++  // Glint: equal light margin around the web content card on all four
++  // sides, so the gray frame reads evenly whether the sidebar is open,
++  // closed, or mid-animation.
++  content_layout->bounds.Inset(gfx::Insets(10));
+   if (target_content_bounds_) {
+     content_layout->bounds.Outset(*target_content_bounds_);
+     contents_clip_rect_ =
+diff --git a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
+index a60e9d398b..e6d43682bd 100644
+--- a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
++++ b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
+@@ -231,6 +231,13 @@ BrowserViewTabbedLayoutImpl::CalculateSeparatorInfo() const {
+       break;
+   }
+ 
++  // Glint: the sidebar (a side panel) is permanent browser chrome, not a
++  // transient panel — never draw the shadow box / padding around the web
++  // contents. It rendered as a gray drop-shadow band on the right and
++  // bottom of the content card.
++  info.shadow_box = false;
++  info.adjust_for_missing_separator = false;
++
+   return info;
+ }
+ 
+@@ -566,20 +573,10 @@ gfx::Size BrowserViewTabbedLayoutImpl::GetMinimumMainAreaSize(
+ 
+ BrowserViewTabbedLayoutImpl::TabStripType
+ BrowserViewTabbedLayoutImpl::GetTabStripType() const {
+-  if (delegate().ShouldDrawVerticalTabStrip()) {
+-#if BUILDFLAG(IS_MAC)
+-    // Do not lay out the vertical tabstrip in content-fullscreen on Mac. This
+-    // check cannot be done in BrowserView because the immersive mode controller
+-    // itself relies on BrowserView reporting which tab strip it *would* draw,
+-    // creating a circular dependency/race condition.
+-    if (fullscreen_utils::IsInContentFullscreen(browser())) {
+-      return TabStripType::kNone;
+-    }
+-#endif
+-    return TabStripType::kVertical;
+-  }
+-  return delegate().ShouldDrawTabStrip() ? TabStripType::kHorizontal
+-                                         : TabStripType::kNone;
++  // Glint: the sidebar is the Glint UI side panel (web UI); no native tab
++  // strip is drawn at all. Restore the pre-Glint body (see git history) to
++  // bring back native vertical tabs.
++  return TabStripType::kNone;
+ }
+ 
+ BrowserViewTabbedLayoutImpl::VerticalTabStripCollapsedState
+@@ -1178,6 +1175,12 @@ BrowserViewTabbedLayoutImpl::CalculateProposedLayout(
+ 
+   if (features::IsGlassFrameEnabled()) {
+     gfx::RoundedCornersF content_corners;
++    // Glint: in web-UI sidebar mode (kNone) the content card keeps its 12px
++    // radii — without this, the glass-frame branch resets them every layout.
++    if (layout_data_->tab_strip_type == TabStripType::kNone &&
++        !is_fullscreen(layout_data_->window_state)) {
++      content_corners = gfx::RoundedCornersF(12.0f);
++    }
+     if (layout_data_->tab_strip_type == TabStripType::kVertical &&
+         !is_fullscreen(layout_data_->window_state)) {
+       // Note that this will set a lower leading corner on the multi contents
+@@ -1357,10 +1360,11 @@ void BrowserViewTabbedLayoutImpl::ConfigureTopContainerBackground(
+       IsParentedTo(views().horizontal_tab_strip_region_view,
+                    views().top_container)) {
+     background->SetPrimaryColor(ui::kColorFrameActive);
+-  } else if (GetTabStripType() == TabStripType::kVertical) {
++  } else if (GetTabStripType() == TabStripType::kVertical ||
++             GetTabStripType() == TabStripType::kNone) {
+     // Glint: the full-width top strip (including the traffic-light zone the
+     // toolbar is excluded from) paints the frame color, so the strip and the
+-    // sidebar read as one continuous surface.
++    // sidebar read as one continuous surface. kNone = web-UI sidebar mode.
+     background->SetPrimaryColor(CustomCornersBackground::FrameTheme());
+   } else {
+     background->SetPrimaryColor(CustomCornersBackground::ToolbarTheme());
+@@ -1371,7 +1375,8 @@ void BrowserViewTabbedLayoutImpl::ConfigureTopContainerBackground(
+ 
+   // Rounded corners are drawn in vertical tab strip mode when not maximized or
+   // fullscreen.
+-  if (layout_data_->tab_strip_type == TabStripType::kVertical &&
++  if ((layout_data_->tab_strip_type == TabStripType::kVertical ||
++       layout_data_->tab_strip_type == TabStripType::kNone) &&
+       layout_data_->window_state == WindowState::kNormal) {
+     corners[CornerOrientation::kTopTrailing] =
+         background->GetWindowCorner(/*upper=*/true);
+diff --git a/chrome/browser/ui/views/frame/main_background_region_view.cc b/chrome/browser/ui/views/frame/main_background_region_view.cc
+index 5bd63ec31b..d9e8193123 100644
+--- a/chrome/browser/ui/views/frame/main_background_region_view.cc
++++ b/chrome/browser/ui/views/frame/main_background_region_view.cc
+@@ -10,8 +10,11 @@
+ MainBackgroundRegionView::MainBackgroundRegionView(BrowserView& browser_view) {
+   SetCanProcessEventsWithinSubtree(false);
+   SetVisible(false);
++  // Glint: this region peeks out beside the sidebar during side-panel
++  // resize clipping — paint it frame gray, not toolbar white, so it blends
++  // with the Glint chrome instead of flashing a white column.
+   SetBackground(std::make_unique<CustomCornersBackground>(
+-      *this, browser_view, CustomCornersBackground::ToolbarTheme(),
++      *this, browser_view, CustomCornersBackground::FrameTheme(),
+       CustomCornersBackground::FrameTheme()));
+ }
+ 
+diff --git a/chrome/browser/ui/views/frame/multi_contents_view.cc b/chrome/browser/ui/views/frame/multi_contents_view.cc
+index f63a1eeac8..cf128dae5a 100644
+--- a/chrome/browser/ui/views/frame/multi_contents_view.cc
++++ b/chrome/browser/ui/views/frame/multi_contents_view.cc
+@@ -84,10 +84,11 @@ MultiContentsView::MultiContentsView(
+ 
+   background_view_ =
+       AddChildView(std::make_unique<MultiContentsBackgroundView>(browser_view));
+-  // Glint: default the content corner radii to the rounded reference look.
+-  // UpdateContentsBorderAndOverlay() propagates GetBackgroundRadii() to the
+-  // active ContentsContainerView on every tab update, so this is the single
+-  // source of truth for the content rounding.
++  // Glint: rounded content card (12px), matching the Electron reference —
++  // the corner curves reveal the frame gray, and the 10px right/bottom
++  // margins in ContentsContainerView make it read as a floating card. This
++  // is the single source of truth for content rounding (propagated via
++  // UpdateContentsBorderAndOverlay()).
+   background_view_->SetRoundedCorners(gfx::RoundedCornersF(12.0f));
+ 
+   contents_container_views_.push_back(
+diff --git a/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.cc b/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.cc
+index 54dde3aa59..af1005f4c6 100644
+--- a/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.cc
++++ b/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.h"
++#include "base/task/single_thread_task_runner.h"
+ 
+ #include "base/strings/utf_string_conversions.h"
+ #include "chrome/browser/extensions/extension_tab_util.h"
+@@ -240,6 +241,27 @@ void ExtensionSidePanelCoordinator::CreateAndRegisterEntry() {
+ 
+   scoped_entry_observation_.Observe(entry.get());
+   registry_->Register(std::move(entry));
++
++  // Glint: the Glint UI extension IS the browser's sidebar — show it as soon
++  // as its window-scoped entry is registered (window creation / extension
++  // load) instead of waiting for a toolbar click. Posted, not inline: the
++  // side panel UI may still be mid-initialization during registration.
++  if (browser_ && extension_->name() == "Glint UI") {
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(&ExtensionSidePanelCoordinator::MaybeAutoShowGlintPanel,
++                       weak_factory_.GetWeakPtr()));
++  }
++}
++
++void ExtensionSidePanelCoordinator::MaybeAutoShowGlintPanel() {
++  if (!browser_) {
++    return;
++  }
++  SidePanelUI* side_panel_ui = browser_->GetFeatures().side_panel_ui();
++  if (side_panel_ui && !side_panel_ui->IsSidePanelShowing()) {
++    side_panel_ui->Show(GetEntryKey());
++  }
+ }
+ 
+ std::unique_ptr<views::View> ExtensionSidePanelCoordinator::CreateView(
+@@ -247,6 +269,7 @@ std::unique_ptr<views::View> ExtensionSidePanelCoordinator::CreateView(
+   host_ = ExtensionViewHostFactory::CreateSidePanelHost(
+       *extension_, side_panel_url_, browser_, tab_interface_);
+ 
++
+   // `host_` could be null if `side_panel_url_` is invalid or if the extension
+   // is not currently enabled. The latter can happen when the extension has
+   // unloaded, and the contextual extension entry is deregistered before the
+diff --git a/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.h b/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.h
+index bcae83d157..89b0479a8d 100644
+--- a/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.h
++++ b/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.h
+@@ -82,6 +82,10 @@ class ExtensionSidePanelCoordinator : public ExtensionViewViews::Observer,
+ 
+   SidePanelEntry::Key GetEntryKey() const;
+ 
++  // Glint: opens this extension's panel automatically (the Glint UI sidebar
++  // is the browser's sidebar; it must not require a toolbar click).
++  void MaybeAutoShowGlintPanel();
++
+   SidePanelEntry* GetEntry() const;
+ 
+   bool IsGlobalCoordinator() const;
+diff --git a/chrome/browser/ui/views/side_panel/side_panel.cc b/chrome/browser/ui/views/side_panel/side_panel.cc
+index 90f261de23..608d8f8c53 100644
+--- a/chrome/browser/ui/views/side_panel/side_panel.cc
++++ b/chrome/browser/ui/views/side_panel/side_panel.cc
+@@ -70,13 +70,13 @@ constexpr BrowserAnimationGroup kAnimationGroup =
+ 
+ // This thickness includes the solid-color background and the inner round-rect
+ // border-color stroke. It does not include the outer-color separator.
+-int GetBorderThickness() {
++[[maybe_unused]] int GetBorderThickness() {
+   return 8 + views::Separator::kThickness;
+ }
+ 
+ // This is how many units of the toolbar are essentially expected to be
+ // background.
+-constexpr int kOverlapFromToolbar = 4;
++[[maybe_unused]] constexpr int kOverlapFromToolbar = 4;
+ 
+ // We want the border to visually look like GetBorderThickness() units on all
+ // sides except the top. On the top side, background is drawn on top of the
+@@ -84,9 +84,10 @@ constexpr int kOverlapFromToolbar = 4;
+ // bookmarks bar) itself. Subtract both of those to not get visually-excessive
+ // padding.
+ gfx::Insets GetBorderInsets() {
+-  int border_thickness = GetBorderThickness();
+-  return gfx::Insets::TLBR(-kOverlapFromToolbar, border_thickness,
+-                           border_thickness, border_thickness);
++  // Glint: chromeless sidebar — flush on all sides except a slim gutter on
++  // the content-facing edge: the native resize strip lives in the border
++  // area, so zero width there would make the sidebar impossible to resize.
++  return gfx::Insets::TLBR(0, 0, 0, 4);
+ }
+ 
+ SidePanel::HorizontalAlignment GetHorizontalAlignment(
+@@ -221,12 +222,8 @@ class ContentParentView : public views::View, public views::ViewObserver {
+   }
+ 
+   gfx::RoundedCornersF GetRoundedCorners() {
+-    ChromeDistanceMetric corner_radius =
+-        ChromeDistanceMetric::DISTANCE_SIDE_PANEL_CONTENT_RADIUS;
+-    return GetLayoutProvider()
+-               ? gfx::RoundedCornersF(
+-                     GetLayoutProvider()->GetDistanceMetric(corner_radius))
+-               : gfx::RoundedCornersF();
++    // Glint: flush sidebar — no rounded card corners on the panel content.
++    return gfx::RoundedCornersF();
+   }
+ 
+   const raw_ptr<BrowserView> browser_view_;
+@@ -402,9 +399,11 @@ bool SidePanel::IsRightAligned() const {
+ 
+ gfx::Size SidePanel::GetMinimumSize() const {
+   const int min_height = 0;
+-  return gfx::Size(
+-      SidePanelEntry::kSidePanelDefaultContentWidth + GetBorderInsets().width(),
+-      min_height);
++  // Glint: the sidebar can shrink well below the stock side-panel floor —
++  // the Electron Glint sidebar is 240px, and narrower still stays usable.
++  constexpr int kGlintMinSidebarWidth = 180;
++  return gfx::Size(kGlintMinSidebarWidth + GetBorderInsets().width(),
++                   min_height);
+ }
+ 
+ bool SidePanel::IsClosing() {
+@@ -456,13 +455,10 @@ void SidePanel::AddHeaderView(std::unique_ptr<views::View> view) {
+   }
+   header_view_ = view.get();
+   AddChildView(std::move(view));
+-  header_view_->InsertAfterInFocusList(resize_area_);
+-  header_view_->DeprecatedLayoutImmediately();
+-  // Update the border so that the insets include space for the header to be
+-  // placed on top of the border area.
+-  int top_inset = header_view_->height() - GetBorderInsets().top();
+-  SetBorder(views::CreateEmptyBorder(GetBorderInsets() +
+-                                     gfx::Insets::TLBR(top_inset, 0, 0, 0)));
++  // Glint: chromeless sidebar — the native header (icon/title/pin/close)
++  // never shows; the Glint UI page starts flush at the panel top.
++  header_view_->SetVisible(false);
++  SetBorder(views::CreateEmptyBorder(GetBorderInsets()));
+ }
+ 
+ void SidePanel::RemoveHeaderView() {
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.cc b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+index b903159117..2e04352c8a 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -100,6 +100,10 @@
+ #include "chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.h"
+ #include "chrome/browser/ui/views/toolbar/reload_button.h"
+ #include "chrome/browser/ui/views/toolbar/split_tabs_button.h"
++#include "chrome/browser/ui/side_panel/side_panel_ui.h"
++#include "chrome/browser/ui/side_panel/side_panel_entry.h"
++#include "chrome/browser/ui/side_panel/side_panel_enums.h"
++#include "extensions/browser/extension_registry.h"
+ #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
+ #include "chrome/browser/ui/views/toolbar/toolbar_controller.h"
+ #include "chrome/browser/ui/views/toolbar/toolbar_divider.h"
+@@ -232,6 +236,12 @@ bool IsPositionInWindowCaptionForView(const views::View* view,
+         views::IsViewClass<ToolbarDivider>(child)) {
+       return true;
+     }
++    // Glint: the invisible spacer occupying the hidden-omnibox slot is a
++    // plain undecorated View — non-interactive, so it drags the window.
++    // Without this the entire middle of the top strip refuses to drag.
++    if (std::string_view(child->GetClassName()) == "View") {
++      return true;
++    }
+     // The point hit an interactive control (button, location bar, etc.).
+     return false;
+   }
+@@ -364,6 +374,10 @@ void ToolbarView::Init() {
+     pinned_toolbar_actions_container_ = AddChildView(
+         std::make_unique<PinnedToolbarActionsContainer>(browser_view_, this));
+     pinned_toolbar_actions_ = pinned_toolbar_actions_container_;
++    // Glint: no pinned toolbar actions (side-panel toggle etc.) — the sidebar
++    // is permanent and the top strip keeps only extensions + app menu on the
++    // right (reference design).
++    pinned_toolbar_actions_container_->SetVisible(false);
+     SetBackground(views::CreateSolidBackground(kColorLocationBarBackground));
+     SetLayoutManager(std::make_unique<views::FlexLayout>())
+         ->SetOrientation(views::LayoutOrientation::kHorizontal)
+@@ -452,6 +466,14 @@ void ToolbarView::Init() {
+         AddChildView(std::make_unique<SplitTabsToolbarButton>(browser_));
+   }
+ 
++  // Glint: sidebar toggle — hides/shows the Glint sidebar with the side
++  // panel's slide animation.
++  glint_sidebar_toggle_ = AddChildView(std::make_unique<ToolbarButton>(
++      base::BindRepeating(&ToolbarView::ToggleGlintSidebar,
++                          base::Unretained(this))));
++  glint_sidebar_toggle_->SetVectorIcon(kDockToLeftIcon);
++  glint_sidebar_toggle_->SetTooltipText(u"Toggle sidebar");
++
+   if (base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks) &&
+       contextual_tasks::kShowEntryPoint.Get() ==
+           contextual_tasks::EntryPointOption::kToolbarEphemeralBranded) {
+@@ -513,6 +535,10 @@ void ToolbarView::Init() {
+     pinned_toolbar_actions_container_ = AddChildView(
+         std::make_unique<PinnedToolbarActionsContainer>(browser_view_, this));
+     pinned_toolbar_actions_ = pinned_toolbar_actions_container_;
++    // Glint: no pinned toolbar actions (side-panel toggle etc.) — the sidebar
++    // is permanent and the top strip keeps only extensions + app menu on the
++    // right (reference design).
++    pinned_toolbar_actions_container_->SetVisible(false);
+   } else {
+     pinned_toolbar_actions_ = toolbar_webview_->GetPinnedToolbarActions();
+   }
+@@ -1283,6 +1309,24 @@ bool ToolbarView::IsPositionInWindowCaption(
+   return IsPositionInWindowCaptionForView(this, test_point);
+ }
+ 
++void ToolbarView::ToggleGlintSidebar() {
++  SidePanelUI* side_panel_ui = browser_->GetFeatures().side_panel_ui();
++  if (!side_panel_ui) {
++    return;
++  }
++  const extensions::ExtensionSet& extensions =
++      extensions::ExtensionRegistry::Get(browser_->profile())
++          ->enabled_extensions();
++  for (const auto& extension : extensions) {
++    if (extension->name() == "Glint UI") {
++      side_panel_ui->Toggle(SidePanelEntry::Key(SidePanelEntry::Id::kExtension,
++                                                extension->id()),
++                            SidePanelOpenTrigger::kToolbarButton);
++      return;
++    }
++  }
++}
++
+ views::Button* ToolbarView::GetChromeLabsButton() const {
+   return ChromeLabsCoordinator::From(browser_)->GetChromeLabsButton();
+ }
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_view.h b/chrome/browser/ui/views/toolbar/toolbar_view.h
+index c2d82dc622..ea804d779f 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_view.h
++++ b/chrome/browser/ui/views/toolbar/toolbar_view.h
+@@ -319,6 +319,9 @@ class ToolbarView : public views::AccessiblePaneView,
+   // Loads the images for all the child views.
+   void LoadImages();
+ 
++  // Glint: show/hide the Glint sidebar side panel.
++  void ToggleGlintSidebar();
++
+   void OnShowForwardButtonChanged();
+ 
+   void OnShowHomeButtonChanged();
+@@ -371,6 +374,9 @@ class ToolbarView : public views::AccessiblePaneView,
+   std::unique_ptr<WebUIToolbarWebView> detached_toolbar_webview_;
+   raw_ptr<HomeButton> home_ = nullptr;
+   raw_ptr<SplitTabsToolbarButton> split_tabs_ = nullptr;
++  // Glint: toggles the Glint sidebar (side panel) with the built-in slide
++  // animation.
++  raw_ptr<ToolbarButton> glint_sidebar_toggle_ = nullptr;
+   raw_ptr<CustomTabBarView> custom_tab_bar_ = nullptr;
+   raw_ptr<LocationBarView> location_bar_view_ = nullptr;
+ 

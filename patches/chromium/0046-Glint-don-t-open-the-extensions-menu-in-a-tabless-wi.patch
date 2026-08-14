@@ -1,0 +1,27 @@
+From 28e3013e56e23d0e6a6bb964e7d8669fd2340d12 Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Wed, 12 Aug 2026 10:02:21 +0200
+Subject: [PATCH 46/60] Glint: don't open the extensions menu in a tabless
+ window (null WebContents deref crash)
+
+---
+ .../ui/views/extensions/extensions_menu_coordinator.cc      | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/chrome/browser/ui/views/extensions/extensions_menu_coordinator.cc b/chrome/browser/ui/views/extensions/extensions_menu_coordinator.cc
+index e8696d573f..3fd096a19d 100644
+--- a/chrome/browser/ui/views/extensions/extensions_menu_coordinator.cc
++++ b/chrome/browser/ui/views/extensions/extensions_menu_coordinator.cc
+@@ -42,6 +42,12 @@ void ExtensionsMenuCoordinator::Show(
+     ExtensionsContainerViews* extensions_container_views) {
+   DCHECK(base::FeatureList::IsEnabled(
+       extensions_features::kExtensionsMenuAccessControl));
++  // Glint: windows can be tabless (blank workspace) — the menu model derefs
++  // the active WebContents unguarded in several places, so refuse to open
++  // the menu without one.
++  if (!browser_->GetActiveTabInterface()) {
++    return;
++  }
+   std::unique_ptr<views::BubbleDialogDelegate> bubble_delegate =
+       CreateExtensionsMenuBubbleDialogDelegate(anchor,
+                                                extensions_container_views);

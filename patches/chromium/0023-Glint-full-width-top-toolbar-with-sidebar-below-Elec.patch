@@ -1,0 +1,175 @@
+From 3f557d4b90eca8ec4169f5317ba6d8b505eed108 Mon Sep 17 00:00:00 2001
+From: Glint <glint@localhost>
+Date: Tue, 21 Jul 2026 09:42:52 +0200
+Subject: [PATCH 23/60] Glint: full-width top toolbar with sidebar below
+ (Electron layout) + expandable Bookmark folder in sidebar
+
+---
+ .../layout/browser_view_tabbed_layout_impl.cc | 22 +++++-
+ .../frame/vertical_tab_strip_region_view.cc   | 74 ++++++++++++++++++-
+ .../frame/vertical_tab_strip_region_view.h    |  4 +
+ 3 files changed, 95 insertions(+), 5 deletions(-)
+
+diff --git a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
+index 8a9a7c3ef3..c3f8b66316 100644
+--- a/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
++++ b/chrome/browser/ui/views/frame/layout/browser_view_tabbed_layout_impl.cc
+@@ -706,6 +706,25 @@ BrowserViewTabbedLayoutImpl::CalculateProposedLayout(
+                     layout_data_->tab_strip_type == TabStripType::kHorizontal);
+   }
+ 
++  // Glint: with vertical tabs, the toolbar spans the full window width at the
++  // very top and the sidebar starts below it (Electron reference layout). This
++  // is the same top-container layout the force_top_container_to_top block
++  // below performs, just done before the sidebar carves off its width.
++  bool glint_top_container_laid_out = false;
++  if (layout_data_->tab_strip_type == TabStripType::kVertical &&
++      IsParentedTo(views().top_container, views().browser_view)) {
++    auto& top_container_layout =
++        layout.AddChild(views().top_container, gfx::Rect());
++    auto top_container_params =
++        params.InLocalCoordinates(params.visual_client_area);
++    const gfx::Rect top_container_local_bounds = CalculateTopContainerLayout(
++        top_container_layout, top_container_params, needs_exclusion);
++    top_container_layout.bounds =
++        GetTopContainerBoundsInParent(top_container_local_bounds, params);
++    params.SetTop(top_container_layout.bounds.bottom());
++    glint_top_container_laid_out = true;
++  }
++
+   // This will be the area next to the vertical tab strip (if present) that will
+   // be targeted for the content area when animating. It allows other elements
+   // to "fly over" the contents.
+@@ -870,7 +889,8 @@ BrowserViewTabbedLayoutImpl::CalculateProposedLayout(
+ 
+   // When the tabstrip isn't at the top or in constrained widths, the top
+   // container is laid out before all side panels.
+-  if (horizontal_layout.force_top_container_to_top &&
++  if (!glint_top_container_laid_out &&
++      horizontal_layout.force_top_container_to_top &&
+       IsParentedTo(views().top_container, views().browser_view)) {
+     auto& top_container_layout =
+         layout.AddChild(views().top_container, gfx::Rect());
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 8a9f37017a..ef1dde72d3 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -70,6 +70,9 @@
+ #include "ui/events/event.h"
+ #include "chrome/app/vector_icons/vector_icons.h"
+ #include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
++#include "chrome/browser/bookmarks/bookmark_model_factory.h"
++#include "components/bookmarks/browser/bookmark_model.h"
++#include "components/bookmarks/browser/bookmark_node.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_tabstrip.h"
+ #include "chrome/browser/ui/tabs/tab_group_model.h"
+@@ -287,12 +290,12 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+   // Glint: bookmarks folder row (matches the reference sidebar). Opens the
+   // bookmark manager in the current tab.
+   auto bookmarks_row = std::make_unique<views::LabelButton>(
+-      base::BindRepeating(&VerticalTabStripRegionView::GlintOpenUrl,
+-                          base::Unretained(this), GURL("chrome://bookmarks")),
+-      u"Bookmarks");
++      base::BindRepeating(&VerticalTabStripRegionView::GlintToggleBookmarks,
++                          base::Unretained(this)),
++      u"Bookmark");
+   bookmarks_row->SetImageModel(
+       views::Button::STATE_NORMAL,
+-      ui::ImageModel::FromVectorIcon(vector_icons::kFolderFlippableIcon,
++      ui::ImageModel::FromVectorIcon(vector_icons::kFolderFilledIcon,
+                                      ui::kColorIcon, 16));
+   bookmarks_row->SetImageLabelSpacing(8);
+   bookmarks_row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+@@ -311,6 +314,19 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
+                         region_horizontal_padding));
+   AddChildView(std::move(bookmarks_row));
+ 
++  // Glint: the list of bookmarks that expands under the folder row, indented
++  // like folder contents. Populated on first expand.
++  auto bookmarks_list = std::make_unique<views::View>();
++  auto* bookmarks_list_layout =
++      bookmarks_list->SetLayoutManager(std::make_unique<views::FlexLayout>());
++  bookmarks_list_layout->SetOrientation(views::LayoutOrientation::kVertical);
++  bookmarks_list->SetProperty(
++      views::kMarginsKey,
++      gfx::Insets::TLBR(0, region_horizontal_padding + 12, 0,
++                        region_horizontal_padding));
++  bookmarks_list->SetVisible(false);
++  glint_bookmarks_list_ = AddChildView(std::move(bookmarks_list));
++
+   // Glint: thin separator between the Bookmark row and the tab list, matching
+   // the reference sidebar.
+   auto* glint_list_separator =
+@@ -1487,6 +1503,56 @@ void VerticalTabStripRegionView::GlintAdoptOrphanTabs() {
+   }
+ }
+ 
++void VerticalTabStripRegionView::GlintToggleBookmarks() {
++  if (!glint_bookmarks_list_ || !glint_browser_) {
++    return;
++  }
++  if (glint_bookmarks_list_->GetVisible()) {
++    glint_bookmarks_list_->SetVisible(false);
++    InvalidateLayout();
++    return;
++  }
++  glint_bookmarks_list_->RemoveAllChildViews();
++  bookmarks::BookmarkModel* model =
++      BookmarkModelFactory::GetForBrowserContext(glint_browser_->profile());
++  int shown = 0;
++  if (model && model->loaded()) {
++    for (const auto& node : model->bookmark_bar_node()->children()) {
++      if (shown >= 12) {
++        break;
++      }
++      if (!node->is_url()) {
++        continue;
++      }
++      auto row = std::make_unique<views::LabelButton>(
++          base::BindRepeating(&VerticalTabStripRegionView::GlintOpenUrl,
++                              base::Unretained(this), node->url()),
++          node->GetTitle());
++      row->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++      row->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(3, 8)));
++      row->SetInstallFocusRingOnFocus(false);
++      views::InkDrop::Get(row.get())
++          ->SetMode(views::InkDropHost::InkDropMode::ON);
++      views::InkDrop::Get(row.get())
++          ->GetInkDrop()
++          ->SetShowHighlightOnHover(true);
++      views::InstallRoundRectHighlightPathGenerator(row.get(), gfx::Insets(),
++                                                    8);
++      glint_bookmarks_list_->AddChildView(std::move(row));
++      ++shown;
++    }
++  }
++  if (shown == 0) {
++    auto empty = std::make_unique<views::Label>(
++        u"No bookmarks yet", views::style::CONTEXT_LABEL,
++        views::style::STYLE_SECONDARY);
++    empty->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++    glint_bookmarks_list_->AddChildView(std::move(empty));
++  }
++  glint_bookmarks_list_->SetVisible(true);
++  InvalidateLayout();
++}
++
+ void VerticalTabStripRegionView::GlintNewTab() {
+   if (!glint_browser_) {
+     return;
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+index 22073d3406..46105afaac 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h
+@@ -309,6 +309,10 @@ class VerticalTabStripRegionView final
+   void GlintHandleNewTab();
+   // Opens a fresh foreground tab in the active space ("New Tab" row / "+").
+   void GlintNewTab();
++  // Expands/collapses the bookmarks folder in the sidebar, listing the
++  // bookmark bar's entries as clickable rows.
++  void GlintToggleBookmarks();
++  raw_ptr<views::View> glint_bookmarks_list_ = nullptr;
+   int glint_active_space_ = 0;
+   std::array<std::optional<tab_groups::TabGroupId>, 3> glint_space_groups_;
+   std::array<raw_ptr<views::LabelButton>, 3> glint_space_dots_ = {};
