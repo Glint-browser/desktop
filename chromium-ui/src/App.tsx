@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import type { BrowserState, ContextMenuRequest, UiAction } from './types'
 import { Sidebar } from './components/Sidebar'
-import { applyThemeAttribute } from './workspaces'
+import { applyThemeAttribute, detectGlassUi, isGlassUi } from './workspaces'
 
 const EMPTY: BrowserState = {
   spaces: [],
@@ -71,16 +71,21 @@ export default function App(): JSX.Element {
     }
   }, [])
 
-  // Apply the sidebar wash from settings, same as the Electron shell.
+  // Apply the sidebar wash from settings, same as the Electron shell. Over
+  // Liquid Glass the panel always renders with the dark palette (white text).
   useEffect(() => {
     const apply = (s: { sidebarOpacity: number; theme: 'system' | 'light' | 'dark' }): void => {
       document.documentElement.style.setProperty(
         '--sidebar-wash',
-        `rgba(255, 255, 255, ${s.sidebarOpacity})`
+        // Over Liquid Glass the sidebar carries no wash at all — even 6%
+        // white reads as a seam against the bare glass gutter beside it.
+        `rgba(255, 255, 255, ${isGlassUi() ? 0 : s.sidebarOpacity})`
       )
-      applyThemeAttribute(s.theme)
+      applyThemeAttribute(isGlassUi() ? 'dark' : s.theme)
     }
-    window.browser.getSettings().then(apply)
+    void detectGlassUi().then(() => {
+      window.browser.getSettings().then(apply)
+    })
     return window.browser.onSettingsChanged(apply)
   }, [])
 

@@ -435,3 +435,34 @@ export function applyThemeAttribute(theme: 'system' | 'light' | 'dark'): void {
       : theme
   document.documentElement.dataset.theme = resolved
 }
+
+// The Liquid Glass chrome (macOS 26+) is dark translucent no matter the
+// theme — the PANEL always uses the dark palette + pure white text so icons
+// and labels stay readable over the glass (Zen-style). Detected via the
+// real platform version (the UA string is frozen).
+let glassUi = false
+
+export function isGlassUi(): boolean {
+  return glassUi
+}
+
+export async function detectGlassUi(): Promise<boolean> {
+  try {
+    const uad = (
+      navigator as unknown as {
+        userAgentData?: {
+          platform: string
+          getHighEntropyValues: (k: string[]) => Promise<{ platformVersion?: string }>
+        }
+      }
+    ).userAgentData
+    if (uad?.platform === 'macOS') {
+      const { platformVersion } = await uad.getHighEntropyValues(['platformVersion'])
+      glassUi = parseInt((platformVersion ?? '0').split('.')[0], 10) >= 26
+    }
+  } catch {
+    glassUi = false
+  }
+  document.documentElement.dataset.glass = glassUi ? 'true' : 'false'
+  return glassUi
+}
