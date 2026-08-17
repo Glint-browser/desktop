@@ -1,7 +1,7 @@
 From dc3fddc7b5127f5ff77b67bf3b45417b98a280e8 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Sun, 5 Jul 2026 13:21:00 +0200
-Subject: [PATCH 06/60] Glint polish: hide avatar button, rounder corners
+Subject: [PATCH 06/61] Glint polish: hide avatar button, rounder corners
  (12px)
 
 ---

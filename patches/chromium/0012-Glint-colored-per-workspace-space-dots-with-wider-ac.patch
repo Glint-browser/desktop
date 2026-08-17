@@ -1,7 +1,7 @@
 From 7fc5a46350d7705e60ee902b0a341ba3ad3556be Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Sun, 5 Jul 2026 23:59:58 +0200
-Subject: [PATCH 12/60] Glint: colored per-workspace space dots with wider
+Subject: [PATCH 12/61] Glint: colored per-workspace space dots with wider
  active pill
 
 ---

@@ -1,7 +1,7 @@
 From 4b22b43a5ba08cbd71a277253d38787b34c0043f Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Sat, 4 Jul 2026 02:12:24 +0200
-Subject: [PATCH 01/60] Glint rebrand: product name, strings, app icon, logos
+Subject: [PATCH 01/61] Glint rebrand: product name, strings, app icon, logos
 
 ---
  chrome/app/chromium_strings.grd               | 1304 ++++++++---------

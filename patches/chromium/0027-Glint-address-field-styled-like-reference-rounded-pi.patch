@@ -1,7 +1,7 @@
 From 2f4f906223947f90e8b05f576fe3ce11a1484654 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 13:37:00 +0200
-Subject: [PATCH 27/60] Glint: address field styled like reference - rounded
+Subject: [PATCH 27/61] Glint: address field styled like reference - rounded
  pill row, borderless textfield, copy + bookmark star inside
 
 ---

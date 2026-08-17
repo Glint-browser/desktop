@@ -1,7 +1,7 @@
 From 6fc54a590e4c8a8e755327edf52a0143b0573afa Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 09:59:13 +0200
-Subject: [PATCH 45/60] =?UTF-8?q?Glint:=20replace=20the=20AppIcon=20asset?=
+Subject: [PATCH 45/61] =?UTF-8?q?Glint:=20replace=20the=20AppIcon=20asset?=
  =?UTF-8?q?=20catalog=20too=20=E2=80=94=20macOS=20prefers=20Assets.car=20(?=
  =?UTF-8?q?CFBundleIconName)=20over=20app.icns,=20so=20the=20Dock=20still?=
  =?UTF-8?q?=20showed=20Chromium?=

@@ -1,7 +1,7 @@
 From 63d7c7718f8ccae554fc1ccfad625bf6c2373ed6 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Mon, 6 Jul 2026 18:15:11 +0200
-Subject: [PATCH 14/60] Glint: omnibox polish - row icons, keyboard nav, clean
+Subject: [PATCH 14/61] Glint: omnibox polish - row icons, keyboard nav, clean
  URL display, copy-link button
 
 ---

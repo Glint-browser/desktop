@@ -1,7 +1,7 @@
 From 9e91479d1f019f038b57f136c06fc231874a0504 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Fri, 14 Aug 2026 09:09:10 +0200
-Subject: [PATCH 58/60] Glint: guard extension action clicks in tabless windows
+Subject: [PATCH 58/61] Glint: guard extension action clicks in tabless windows
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
