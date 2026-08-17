@@ -8,6 +8,8 @@ export const UPDATE_REPO = 'Glint-browser/desktop'
 export interface UpdateInfo {
   version: string
   url: string
+  /** Direct .zip asset — the native self-updater downloads this. */
+  zipUrl?: string
 }
 
 function newerThan(a: string, b: string): boolean {
@@ -39,12 +41,14 @@ export async function runUpdateCheck(): Promise<UpdateInfo | null> {
       | { name?: string; browser_download_url?: string }[]
       | undefined
     const dmg = assets?.find((a) => a.name?.endsWith('.dmg'))
+    const zip = assets?.find((a) => a.name?.endsWith('.zip'))
     const info: UpdateInfo = {
       version: latest,
       url:
         dmg?.browser_download_url ??
         rel.html_url ??
-        `https://github.com/${UPDATE_REPO}/releases/latest`
+        `https://github.com/${UPDATE_REPO}/releases/latest`,
+      zipUrl: zip?.browser_download_url
     }
     await chrome.storage.local.set({ updateInfo: info })
     return info

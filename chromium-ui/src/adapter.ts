@@ -634,10 +634,18 @@ const api = {
 
   installUpdate: async (): Promise<void> => {
     const { updateInfo } = await chrome.storage.local.get('updateInfo')
-    const url =
-      (updateInfo as { url?: string } | null)?.url ??
-      `https://github.com/${UPDATE_REPO}/releases/latest`
-    await chrome.tabs.create({ url })
+    const info = updateInfo as { url?: string; zipUrl?: string } | null
+    if (info?.zipUrl) {
+      // Native self-update: the fork downloads, stages and — on the restart
+      // click — swaps the bundle and relaunches. Status streams back via
+      // chrome.storage ("glintUpdateStatus").
+      window.location.href =
+        'glint://update-start/' + encodeURIComponent(info.zipUrl)
+      return
+    }
+    await chrome.tabs.create({
+      url: info?.url ?? `https://github.com/${UPDATE_REPO}/releases/latest`
+    })
   },
 
   onUpdateStatus: (cb: (status: UpdateStatus) => void): (() => void) => {
@@ -645,6 +653,25 @@ const api = {
       if ('updateInfo' in changes) {
         const v = changes.updateInfo.newValue as { version: string } | null
         cb(v ? { state: 'available', version: v.version } : { state: 'not-available' })
+      }
+      if ('glintUpdateStatus' in changes) {
+        // Written natively by the self-updater during download/staging.
+        const v = changes.glintUpdateStatus.newValue as
+          | { state: string; percent?: number; message?: string }
+          | null
+        if (!v) return
+        if (v.state === 'downloading') {
+          cb({ state: 'downloading', percent: v.percent ?? 0 })
+        } else if (v.state === 'downloaded') {
+          void chrome.storage.local.get('updateInfo').then(({ updateInfo }) => {
+            cb({
+              state: 'downloaded',
+              version: (updateInfo as { version?: string } | null)?.version ?? ''
+            })
+          })
+        } else if (v.state === 'error') {
+          cb({ state: 'error', message: v.message ?? 'Update failed' })
+        }
       }
     }
     chrome.storage.local.onChanged.addListener(listener)

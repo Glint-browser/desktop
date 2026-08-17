@@ -349,8 +349,19 @@ function UpdatesRow(): JSX.Element {
         {status?.state === 'available' && ` — version ${status.version} is available`}
         {status?.state === 'not-available' && ' — up to date'}
         {status?.state === 'checking' && ' — checking…'}
+        {status?.state === 'downloading' && ` — downloading… ${status.percent}%`}
+        {status?.state === 'downloaded' && ' — ready to install'}
+        {status?.state === 'error' && ` — ${status.message}`}
       </div>
-      {status?.state === 'available' ? (
+      {status?.state === 'downloaded' ? (
+        <button className="settings-btn" onClick={() => applyNative('update-restart')}>
+          Restart Glint to update
+        </button>
+      ) : status?.state === 'downloading' ? (
+        <button className="settings-btn" disabled>
+          Downloading… {status.percent}%
+        </button>
+      ) : status?.state === 'available' ? (
         <button className="settings-btn" onClick={() => void window.browser.installUpdate()}>
           Download Glint {status.version}
         </button>

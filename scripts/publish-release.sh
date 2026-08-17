@@ -31,7 +31,12 @@ SRC_DMG=$(/bin/ls -t "$HOME"/Desktop/Glint-*-arm64.dmg | head -1)
 DMG="$HOME/Desktop/Glint-$V-arm64.dmg"
 [ "$SRC_DMG" = "$DMG" ] || mv "$SRC_DMG" "$DMG"
 
-gh release create "v$V" "$DMG" --repo "$REPO" --title "Glint $V" --generate-notes
+# Zip asset for the in-app self-updater (downloads, stages, swaps, relaunches).
+ZIP="$HOME/Desktop/Glint-$V-arm64.zip"
+rm -f "$ZIP"
+ditto -c -k --keepParent "$HOME/chromium/src/out/glint-release/Glint.app" "$ZIP"
+
+gh release create "v$V" "$DMG" "$ZIP" --repo "$REPO" --title "Glint $V" --generate-notes
 git add chromium-ui/public/manifest.json
 git commit -m "release: v$V"
 echo
