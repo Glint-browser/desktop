@@ -337,6 +337,35 @@ function UpdatesRow(): JSX.Element {
     return window.browser.onUpdateStatus(setStatus)
   }, [])
 
+  // The native self-updater writes progress straight into the extension's
+  // value store, which does NOT fire storage.onChanged — poll instead so
+  // the download progress and the restart button actually appear.
+  useEffect(() => {
+    let live = true
+    const read = async (): Promise<void> => {
+      const { glintUpdateStatus } = await chrome.storage.local.get('glintUpdateStatus')
+      if (!live || !glintUpdateStatus) return
+      const s = glintUpdateStatus as { state: string; percent?: number; message?: string }
+      if (s.state === 'downloading') {
+        setStatus({ state: 'downloading', percent: s.percent ?? 0 })
+      } else if (s.state === 'downloaded') {
+        const { updateInfo } = await chrome.storage.local.get('updateInfo')
+        setStatus({
+          state: 'downloaded',
+          version: (updateInfo as { version?: string } | null)?.version ?? ''
+        })
+      } else if (s.state === 'error') {
+        setStatus({ state: 'error', message: s.message ?? 'Update failed' })
+      }
+    }
+    void read()
+    const id = setInterval(read, 1000)
+    return () => {
+      live = false
+      clearInterval(id)
+    }
+  }, [])
+
   const check = async (): Promise<void> => {
     setStatus({ state: 'checking' })
     setStatus(await window.browser.checkForUpdates())
