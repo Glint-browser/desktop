@@ -1,7 +1,7 @@
 From 4eba85170fcfee5a5d3de34463acb6fec96865a1 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 09:33:21 +0200
-Subject: [PATCH 40/61] Glint: native command palette, Glint settings window,
+Subject: [PATCH 40/62] Glint: native command palette, Glint settings window,
  glint:// bridge, workspaces, profiles
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

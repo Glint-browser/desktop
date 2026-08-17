@@ -1,7 +1,7 @@
 From ff6828cc2507f13c2468a3d40e2c730ad6b52cae Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Sun, 5 Jul 2026 20:21:33 +0200
-Subject: [PATCH 07/61] Glint Arc layout: neutral gray theme, content card,
+Subject: [PATCH 07/62] Glint Arc layout: neutral gray theme, content card,
  hide top toolbar, airier tabs
 
 ---

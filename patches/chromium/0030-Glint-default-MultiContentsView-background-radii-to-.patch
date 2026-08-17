@@ -1,7 +1,7 @@
 From bcebcac74858cbac0ecee6a43a2c3e00249a09b9 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 15:00:43 +0200
-Subject: [PATCH 30/61] Glint: default MultiContentsView background radii to 12
+Subject: [PATCH 30/62] Glint: default MultiContentsView background radii to 12
  - UpdateContentsBorderAndOverlay was resetting content corners to zero
 
 ---

@@ -1,7 +1,7 @@
 From 99eb5e6d1b293f704708a238d10964709de16bec Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Mon, 6 Jul 2026 22:04:02 +0200
-Subject: [PATCH 19/61] Glint: floating rounded content card - 12px corners,
+Subject: [PATCH 19/62] Glint: floating rounded content card - 12px corners,
  10px gray margin, frame-colored widget bg, invisible corner patches
 
 ---

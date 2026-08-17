@@ -1,7 +1,7 @@
 From 6c2f27b2dae89432c8db2543585d8ad5dee39b3c Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 14:26:38 +0200
-Subject: [PATCH 29/61] Glint: round the web content corners (12px) to match
+Subject: [PATCH 29/62] Glint: round the web content corners (12px) to match
  reference
 
 ---

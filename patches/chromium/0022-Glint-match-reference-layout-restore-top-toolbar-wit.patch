@@ -1,7 +1,7 @@
 From 77f460b4e3c6d9607a93fda2fc5a777f2d461f6b Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 09:17:42 +0200
-Subject: [PATCH 22/61] Glint: match reference layout - restore top toolbar
+Subject: [PATCH 22/62] Glint: match reference layout - restore top toolbar
  with omnibox hidden, remove sidebar nav row, flat joined content, list
  separator, left-aligned dots
 

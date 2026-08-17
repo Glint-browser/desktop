@@ -1,7 +1,7 @@
 From 6524ac92e0eaa1b6cdc889dd11d5ff61976128cf Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Mon, 6 Jul 2026 21:24:03 +0200
-Subject: [PATCH 17/61] Glint: Electron-parity sidebar - nav buttons, reordered
+Subject: [PATCH 17/62] Glint: Electron-parity sidebar - nav buttons, reordered
  header, New Tab row, no bottom pill
 
 ---

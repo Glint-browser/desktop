@@ -1,7 +1,7 @@
 From 6bf9b4df4c67312a08fbb669516de92bedae5fb7 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 11:33:54 +0200
-Subject: [PATCH 55/61] Glint: bake the Glint UI extension into the browser as
+Subject: [PATCH 55/62] Glint: bake the Glint UI extension into the browser as
  a component extension
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

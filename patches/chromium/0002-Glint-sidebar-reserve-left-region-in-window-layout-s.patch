@@ -1,7 +1,7 @@
 From d9b8e1c76e52e0e567d996f5f1da26ad8ee72651 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Sat, 4 Jul 2026 03:13:18 +0200
-Subject: [PATCH 02/61] Glint sidebar: reserve left region in window layout +
+Subject: [PATCH 02/62] Glint sidebar: reserve left region in window layout +
  side panel defaults left
 
 ---

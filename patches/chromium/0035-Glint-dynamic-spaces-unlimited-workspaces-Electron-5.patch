@@ -1,7 +1,7 @@
 From 93de26d99ac68978e2e437c179995b210dc251f6 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Wed, 22 Jul 2026 10:04:54 +0200
-Subject: [PATCH 35/61] Glint: dynamic spaces - unlimited workspaces, Electron
+Subject: [PATCH 35/62] Glint: dynamic spaces - unlimited workspaces, Electron
  5-color palette, new-workspace button, per-space active-tab memory,
  drag-tab-to-dot moves between spaces
 

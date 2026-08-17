@@ -1,7 +1,7 @@
 From 8251f5548ecf8092549b5a38adc741c3d5c537b9 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 10:19:32 +0200
-Subject: [PATCH 50/61] =?UTF-8?q?Glint:=20ship=20the=20raw=20sparkle=20as?=
+Subject: [PATCH 50/62] =?UTF-8?q?Glint:=20ship=20the=20raw=20sparkle=20as?=
  =?UTF-8?q?=20app=20icon=20=E2=80=94=20macOS=20Tahoe=20composes=20the=20st?=
  =?UTF-8?q?andard=20plate=20itself=20(matches=20the=20Electron=20look)?=
 MIME-Version: 1.0

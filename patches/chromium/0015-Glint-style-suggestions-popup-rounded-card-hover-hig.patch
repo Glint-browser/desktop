@@ -1,7 +1,7 @@
 From 31bf74f830429531c6c97ac98d54defda08f5567 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Mon, 6 Jul 2026 18:25:32 +0200
-Subject: [PATCH 15/61] Glint: style suggestions popup (rounded card, hover
+Subject: [PATCH 15/62] Glint: style suggestions popup (rounded card, hover
  highlight, tight rows)
 
 ---

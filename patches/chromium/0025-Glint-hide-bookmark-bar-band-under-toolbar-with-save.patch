@@ -1,7 +1,7 @@
 From b75fafb717bba0f9eb34747c79c536d5b6ef8073 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 10:10:14 +0200
-Subject: [PATCH 25/61] Glint: hide bookmark bar (band under toolbar with
+Subject: [PATCH 25/62] Glint: hide bookmark bar (band under toolbar with
  saved-groups grid button) + frame-gray toolbar strip
 
 ---
