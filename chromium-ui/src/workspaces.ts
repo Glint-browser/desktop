@@ -86,10 +86,12 @@ function parseMarkedId(title: string): string | null {
   return hex
 }
 
-/** Group title without the invisible marker (for display / name sync). */
+/** Group title without the invisible marker (for display / name sync).
+ *  Aggressive: also removes stray marker characters anywhere — corrupted
+ *  names/titles with accumulated markers must never survive a pass. */
 export function stripMarker(title: string): string {
   const i = title.indexOf(MARK)
-  return i === -1 ? title : title.slice(0, i)
+  return (i === -1 ? title : title.slice(0, i)).replace(/[\u2063\u200b\u200c]/g, '')
 }
 
 export interface WorkspaceState {
@@ -151,6 +153,14 @@ export async function reconcileWorkspaces(windowId?: number): Promise<WorkspaceS
 
   const liveIds = new Set(groups.map((g) => g.id))
   const claimed = new Set<number>()
+
+  // Sanitation: registry names must never contain marker characters — a
+  // polluted name makes every stamping pass append another marker, and the
+  // ballooning titles CHECK-crash the browser's session save.
+  for (const w of workspaces) {
+    const clean = stripMarker(w.name)
+    if (clean !== w.name) w.name = clean || 'Space'
+  }
 
   // Cleanup: two registry entries must never share a group, and identical
   // empty duplicates (damage from historical double-writer sessions) collapse.
