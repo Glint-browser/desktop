@@ -1,7 +1,7 @@
 From 6d89a7d1027f1017533ba5c43f409acd7eae25fc Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Mon, 6 Jul 2026 21:32:31 +0200
-Subject: [PATCH 18/62] Glint: fix layout blowup - two-arg FlexSpecification
+Subject: [PATCH 18/63] Glint: fix layout blowup - two-arg FlexSpecification
  applies to both axes; use BoxLayout row + oriented spacer
 
 ---

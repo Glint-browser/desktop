@@ -1,7 +1,7 @@
 From 06613d4db399789a029a682e20bbb740fe0585ea Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Thu, 23 Jul 2026 08:41:51 +0200
-Subject: [PATCH 36/62] Glint: adopt startup-restored tabs into first space
+Subject: [PATCH 36/63] Glint: adopt startup-restored tabs into first space
  (insert-observer misses pre-construction inserts) + diagnostic logging for
  space adoption/collapse
 

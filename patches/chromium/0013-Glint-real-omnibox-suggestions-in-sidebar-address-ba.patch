@@ -1,7 +1,7 @@
 From bc110954b401d32d12c5bc387116153296ed63dc Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Mon, 6 Jul 2026 00:14:22 +0200
-Subject: [PATCH 13/62] Glint: real omnibox suggestions in sidebar address bar
+Subject: [PATCH 13/63] Glint: real omnibox suggestions in sidebar address bar
  (AutocompleteController + dropdown)
 
 ---

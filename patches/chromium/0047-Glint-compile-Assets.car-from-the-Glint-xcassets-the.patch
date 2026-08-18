@@ -1,7 +1,7 @@
 From 7d8a6d06ac14cd4525e2eba8a27d567a3145dfef Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 10:08:41 +0200
-Subject: [PATCH 47/62] =?UTF-8?q?Glint:=20compile=20Assets.car=20from=20th?=
+Subject: [PATCH 47/63] =?UTF-8?q?Glint:=20compile=20Assets.car=20from=20th?=
  =?UTF-8?q?e=20Glint=20xcassets=20=E2=80=94=20the=20build=20copies=20the?=
  =?UTF-8?q?=20PREBUILT=20car,=20so=20editing=20xcassets=20alone=20never=20?=
  =?UTF-8?q?changed=20the=20Dock=20icon?=

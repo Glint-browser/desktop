@@ -1,7 +1,7 @@
 From ca1d72b4b067e4da6e60918777ff9652d4491063 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 15:55:16 +0200
-Subject: [PATCH 34/62] Glint: GetTabDragTarget must be public (called by
+Subject: [PATCH 34/63] Glint: GetTabDragTarget must be public (called by
  BrowserView)
 
 ---

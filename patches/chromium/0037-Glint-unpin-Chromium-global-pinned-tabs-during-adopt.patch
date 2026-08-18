@@ -1,7 +1,7 @@
 From a52e47fbebf6d3f11432d7abfa4ca071c17576b3 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Thu, 23 Jul 2026 09:17:08 +0200
-Subject: [PATCH 37/62] Glint: unpin Chromium-global pinned tabs during
+Subject: [PATCH 37/63] Glint: unpin Chromium-global pinned tabs during
  adoption - pinned tabs bypass groups and leaked into every space
 
 ---

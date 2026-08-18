@@ -1,7 +1,7 @@
 From d6194ff0a0834bb6a854ac0f4426ccdf5270568f Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Sat, 4 Jul 2026 18:51:51 +0200
-Subject: [PATCH 04/62] Glint theme: purple brand seed color + default to Light
+Subject: [PATCH 04/63] Glint theme: purple brand seed color + default to Light
  mode
 
 ---

@@ -1,7 +1,7 @@
 From 27a711f8eb2002311c542407ba419c5ed6ce7188 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 15:46:18 +0200
-Subject: [PATCH 33/62] Glint: drag tabs onto bookmark folders (TabDragTarget)
+Subject: [PATCH 33/63] Glint: drag tabs onto bookmark folders (TabDragTarget)
  + inline folder-name editor on create
 
 ---

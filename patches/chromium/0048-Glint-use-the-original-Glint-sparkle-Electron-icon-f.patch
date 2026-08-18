@@ -1,7 +1,7 @@
 From 75c6af18429df4be119ece5216bfad2d31136ee7 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 10:15:13 +0200
-Subject: [PATCH 48/62] Glint: use the original Glint sparkle (Electron icon)
+Subject: [PATCH 48/63] Glint: use the original Glint sparkle (Electron icon)
  for app icon and product logos
 
 App icon = the gradient sparkle on a white macOS plate (icns + compiled

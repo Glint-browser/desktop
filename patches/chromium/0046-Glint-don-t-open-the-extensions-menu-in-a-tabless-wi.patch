@@ -1,7 +1,7 @@
 From 28e3013e56e23d0e6a6bb964e7d8669fd2340d12 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 10:02:21 +0200
-Subject: [PATCH 46/62] Glint: don't open the extensions menu in a tabless
+Subject: [PATCH 46/63] Glint: don't open the extensions menu in a tabless
  window (null WebContents deref crash)
 
 ---
