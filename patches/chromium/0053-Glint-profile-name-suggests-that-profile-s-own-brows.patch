@@ -1,7 +1,7 @@
 From b783d8825843d3d939a383d8e0ef538d905b9d41 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 10:39:13 +0200
-Subject: [PATCH 53/63] Glint: /profile <name> suggests that profile's own
+Subject: [PATCH 53/64] Glint: /profile <name> suggests that profile's own
  browsing history
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

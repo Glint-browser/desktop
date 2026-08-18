@@ -1,7 +1,7 @@
 From 3d86e681a4c77dc09ddf13753b155487e912ae13 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 09:52:42 +0200
-Subject: [PATCH 24/63] Glint: spacer in the omnibox slot keeps toolbar
+Subject: [PATCH 24/64] Glint: spacer in the omnibox slot keeps toolbar
  menu/extensions right-aligned
 
 ---

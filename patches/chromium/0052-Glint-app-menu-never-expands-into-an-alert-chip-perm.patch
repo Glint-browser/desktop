@@ -1,7 +1,7 @@
 From 60cd8795ff0a3b268b00a79ca3d5a9e8281bf6e9 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 10:32:39 +0200
-Subject: [PATCH 52/63] Glint: app menu never expands into an alert chip
+Subject: [PATCH 52/64] Glint: app menu never expands into an alert chip
  (permanent 'Error' pill in keyless builds)
 
 ---

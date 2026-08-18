@@ -1,7 +1,7 @@
 From 4b57494b23d52c218065e60259d6e429f3773e00 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 09:33:49 +0200
-Subject: [PATCH 42/63] Glint: always boot the Default profile, never force the
+Subject: [PATCH 42/64] Glint: always boot the Default profile, never force the
  profile picker
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

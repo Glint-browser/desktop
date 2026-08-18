@@ -1,7 +1,7 @@
 From 94b41159f1d476f178081ff639e29de92e7c1533 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 15:25:18 +0200
-Subject: [PATCH 32/63] Glint: reference bookmark UX - empty by default, header
+Subject: [PATCH 32/64] Glint: reference bookmark UX - empty by default, header
  folder button creates folders, always-live tree
 
 ---

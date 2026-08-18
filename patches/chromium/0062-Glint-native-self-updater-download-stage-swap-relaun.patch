@@ -1,7 +1,7 @@
 From 1d2dfa0b79975e3edd8fbf66663b9ca2c1b87ff5 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Mon, 17 Aug 2026 10:06:23 +0200
-Subject: [PATCH 62/63] =?UTF-8?q?Glint:=20native=20self-updater=20?=
+Subject: [PATCH 62/64] =?UTF-8?q?Glint:=20native=20self-updater=20?=
  =?UTF-8?q?=E2=80=94=20download,=20stage,=20swap,=20relaunch?=
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

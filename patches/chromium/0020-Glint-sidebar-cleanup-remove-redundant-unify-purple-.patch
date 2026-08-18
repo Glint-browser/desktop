@@ -1,7 +1,7 @@
 From 060770c9816704724936460d40c3f5ffd561ac4b Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Mon, 20 Jul 2026 13:05:59 +0200
-Subject: [PATCH 20/63] Glint: sidebar cleanup - remove redundant +, unify
+Subject: [PATCH 20/64] Glint: sidebar cleanup - remove redundant +, unify
  purple accent into one constant, theme suggestions popup
 
 ---

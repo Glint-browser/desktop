@@ -1,7 +1,7 @@
 From 33bb93fb772fc400efa139d26b146d296da2e206 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 11:12:22 +0200
-Subject: [PATCH 54/63] =?UTF-8?q?Glint:=20ProfilePicker::Show=20opens=20a?=
+Subject: [PATCH 54/64] =?UTF-8?q?Glint:=20ProfilePicker::Show=20opens=20a?=
  =?UTF-8?q?=20Default-profile=20window=20instead=20=E2=80=94=20kills=20eve?=
  =?UTF-8?q?ry=20picker=20entry=20point=20(startup,=20Dock=20reopen,=20menu?=
  =?UTF-8?q?s)?=

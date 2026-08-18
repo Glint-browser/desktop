@@ -1,7 +1,7 @@
 From f508b9e2279ec3563aeb0a8d56147239fa2d5466 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 09:46:45 +0200
-Subject: [PATCH 43/63] Glint: adblock in profile tabs, theme-aware palette,
+Subject: [PATCH 43/64] Glint: adblock in profile tabs, theme-aware palette,
  Glint profile deletion
 
 - Schibsted CMP blocker moved to a bundled component extension

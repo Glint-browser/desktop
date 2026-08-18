@@ -1,7 +1,7 @@
 From 7cd7ffde80dbd8ad9f33bdbe8c685c03f657ec01 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 13:50:09 +0200
-Subject: [PATCH 57/63] Glint: favicons on command palette history rows
+Subject: [PATCH 57/64] Glint: favicons on command palette history rows
 
 History and profile-history rows start with the generic clock glyph and
 swap to the site's favicon as FaviconService lookups resolve (matched
