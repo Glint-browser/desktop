@@ -1,7 +1,7 @@
 From 522eab4478891953324c135d9a94d7ff5dafd9f4 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Fri, 14 Aug 2026 09:45:15 +0200
-Subject: [PATCH 59/64] Glint: Liquid Glass frame on by default (macOS 26+)
+Subject: [PATCH 59/65] Glint: Liquid Glass frame on by default (macOS 26+)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

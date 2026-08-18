@@ -1,7 +1,7 @@
 From 637ae1e2545a886ba7706f139d8c0e8b10187f40 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 10:24:15 +0200
-Subject: [PATCH 51/64] =?UTF-8?q?Glint:=20never=20create=20the=20avatar=20?=
+Subject: [PATCH 51/65] =?UTF-8?q?Glint:=20never=20create=20the=20avatar=20?=
  =?UTF-8?q?toolbar=20button=20=E2=80=94=20hiding=20it=20was=20undone=20by?=
  =?UTF-8?q?=20its=20own=20signin-error=20state=20(the=20toolbar=20'Error'?=
  =?UTF-8?q?=20pill)?=

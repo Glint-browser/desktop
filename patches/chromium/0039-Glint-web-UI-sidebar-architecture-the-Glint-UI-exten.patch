@@ -1,7 +1,7 @@
 From 9b7786b06b9dcf4e5f89a8e951cb5e90ddb6af19 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 09:33:03 +0200
-Subject: [PATCH 39/64] =?UTF-8?q?Glint:=20web-UI=20sidebar=20architecture?=
+Subject: [PATCH 39/65] =?UTF-8?q?Glint:=20web-UI=20sidebar=20architecture?=
  =?UTF-8?q?=20=E2=80=94=20the=20Glint=20UI=20extension=20side=20panel=20IS?=
  =?UTF-8?q?=20the=20sidebar?=
 MIME-Version: 1.0
