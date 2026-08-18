@@ -412,19 +412,22 @@ const api = {
     // Grouping happens in the background worker (single writer — its
     // adoption listener must see the materializing flag in-process). If the
     // worker is unreachable, do it here rather than dropping the click.
+    // windowId scopes the new space's active state to THIS window.
+    const windowId = await currentWindowId()
     try {
-      await chrome.runtime.sendMessage({ type: 'create-workspace', name })
+      await chrome.runtime.sendMessage({ type: 'create-workspace', name, windowId })
     } catch {
-      await createWorkspace(name)
+      await createWorkspace(name, windowId)
     }
     return ''
   },
 
   activateSpace: async (id: string): Promise<void> => {
+    const windowId = await currentWindowId()
     try {
-      await chrome.runtime.sendMessage({ type: 'activate-workspace', id })
+      await chrome.runtime.sendMessage({ type: 'activate-workspace', id, windowId })
     } catch {
-      await activateWorkspace(id)
+      await activateWorkspace(id, windowId)
     }
   },
 

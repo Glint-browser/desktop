@@ -99,7 +99,7 @@ export interface WorkspaceState {
   activeId: string
 }
 
-export async function loadWorkspaces(): Promise<{
+export async function loadWorkspaces(windowId?: number): Promise<{
   workspaces: Workspace[]
   activeId: string | null
 }> {
@@ -107,14 +107,46 @@ export async function loadWorkspaces(): Promise<{
     'workspaces',
     'activeWorkspaceId'
   ])
+  let activeId = (activeWorkspaceId as string) ?? null
+  if (windowId !== undefined) {
+    // Active workspace is PER WINDOW, so two windows can show different
+    // workspaces (and different profile tabs) at the same time instead of
+    // mirroring each other. windowIds are per-session, so this map lives in
+    // session storage; activeWorkspaceId stays as the global last-active
+    // fallback for new windows and restarts.
+    const { activeByWindow } = await chrome.storage.session.get('activeByWindow')
+    const perWindow = (activeByWindow as Record<string, string>)?.[String(windowId)]
+    if (perWindow) activeId = perWindow
+  }
   return {
     workspaces: (workspaces as Workspace[]) ?? [],
-    activeId: (activeWorkspaceId as string) ?? null
+    activeId
   }
 }
 
-async function saveWorkspaces(workspaces: Workspace[], activeId: string): Promise<void> {
+/** Records the active workspace for a window (and as the global last-active). */
+export async function setWindowActiveWorkspace(
+  windowId: number,
+  activeId: string
+): Promise<void> {
+  await chrome.storage.local.set({ activeWorkspaceId: activeId })
+  const { activeByWindow } = await chrome.storage.session.get('activeByWindow')
+  const map = (activeByWindow as Record<string, string>) ?? {}
+  if (map[String(windowId)] !== activeId) {
+    map[String(windowId)] = activeId
+    await chrome.storage.session.set({ activeByWindow: map })
+  }
+}
+
+async function saveWorkspaces(
+  workspaces: Workspace[],
+  activeId: string,
+  windowId?: number
+): Promise<void> {
   await chrome.storage.local.set({ workspaces, activeWorkspaceId: activeId })
+  if (windowId !== undefined) {
+    await setWindowActiveWorkspace(windowId, activeId)
+  }
 }
 
 async function currentWindowId(): Promise<number> {
@@ -148,7 +180,7 @@ export async function reconcileWorkspaces(windowId?: number): Promise<WorkspaceS
     return { workspaces: stored.workspaces, activeId: stored.activeId ?? '' }
   }
   const groups = await chrome.tabGroups.query({ windowId: win })
-  const { workspaces, activeId } = await loadWorkspaces()
+  const { workspaces, activeId } = await loadWorkspaces(win)
   const before = JSON.stringify({ workspaces, activeId })
 
   const liveIds = new Set(groups.map((g) => g.id))
@@ -302,7 +334,7 @@ export async function reconcileWorkspaces(windowId?: number): Promise<WorkspaceS
   // Only persist when something actually changed — reconcile runs on every
   // panel render, and an unconditional write would loop via storage.onChanged.
   if (JSON.stringify({ workspaces, activeId: active }) !== before) {
-    await saveWorkspaces(workspaces, active)
+    await saveWorkspaces(workspaces, active, win)
   }
   return { workspaces, activeId: active }
 }
@@ -336,25 +368,29 @@ export async function activateWorkspace(id: string, windowId?: number): Promise<
     // (the scroll gesture cycles past empty workspaces without side
     // effects). The first tab opened here materializes the group via the
     // background adoption listener.
-    await saveWorkspaces(state.workspaces, id)
+    await saveWorkspaces(state.workspaces, id, win)
     return
   }
 
   const tabs = await chrome.tabs.query({ windowId: win, groupId: ws.groupId })
   if (tabs.length === 0) {
     ws.groupId = null
-    await saveWorkspaces(state.workspaces, id)
+    await saveWorkspaces(state.workspaces, id, win)
     return activateWorkspace(id, win)
   }
   const { wsLastActive } = await chrome.storage.session.get('wsLastActive')
   const remembered = ((wsLastActive as Record<string, number>) ?? {})[id]
   const target = tabs.find((t) => t.id === remembered) ?? tabs[0]
-  await saveWorkspaces(state.workspaces, id)
+  await saveWorkspaces(state.workspaces, id, win)
   await chrome.tabs.update(target.id!, { active: true })
 }
 
-export async function createWorkspace(name?: string): Promise<string> {
-  const state = await reconcileWorkspaces()
+export async function createWorkspace(
+  name?: string,
+  windowId?: number
+): Promise<string> {
+  const win = windowId ?? (await currentWindowId())
+  const state = await reconcileWorkspaces(win)
   const ws: Workspace = {
     id: crypto.randomUUID(),
     name: name ?? `Space ${state.workspaces.length + 1}`,
@@ -362,8 +398,8 @@ export async function createWorkspace(name?: string): Promise<string> {
     groupId: null
   }
   state.workspaces.push(ws)
-  await saveWorkspaces(state.workspaces, state.activeId)
-  await activateWorkspace(ws.id)
+  await saveWorkspaces(state.workspaces, state.activeId, win)
+  await activateWorkspace(ws.id, win)
   return ws.id
 }
 
@@ -411,7 +447,7 @@ export async function deleteWorkspace(id: string): Promise<void> {
     })
   }
   const nextActive = state.workspaces[Math.max(0, index - 1)].id
-  await saveWorkspaces(state.workspaces, nextActive)
+  await saveWorkspaces(state.workspaces, nextActive, win)
 
   // Activate the neighbour BEFORE closing tabs: closing the active tab would
   // otherwise make Chromium focus some arbitrary tab in another group.

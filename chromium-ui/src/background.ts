@@ -17,6 +17,7 @@ import {
   isMaterializing,
   loadWorkspaces,
   reconcileWorkspaces,
+  setWindowActiveWorkspace,
   stripMarker,
   workspaceByGroup
 } from './workspaces'
@@ -53,11 +54,12 @@ async function inStartupGrace(): Promise<boolean> {
 
 async function adoptStrayTabs(): Promise<void> {
   try {
-    const state = await reconcileWorkspaces()
-    const active = state.workspaces.find((w) => w.id === state.activeId)
-    if (!active) return
     const wins = await chrome.windows.getAll({ windowTypes: ['normal'] })
     for (const win of wins) {
+      if (win.id === undefined) continue
+      const state = await reconcileWorkspaces(win.id)
+      const active = state.workspaces.find((w) => w.id === state.activeId)
+      if (!active) continue
       const tabs = await chrome.tabs.query({ windowId: win.id })
       const stray = tabs.filter(
         (t) => t.id !== undefined && !t.pinned && (t.groupId === undefined || t.groupId === -1)
@@ -102,7 +104,7 @@ chrome.runtime.onStartup.addListener(() => void beginStartupGrace())
 chrome.tabs.onActivated.addListener(async (info) => {
   try {
     const tab = await chrome.tabs.get(info.tabId)
-    const { workspaces, activeId } = await loadWorkspaces()
+    const { workspaces, activeId } = await loadWorkspaces(info.windowId)
     if (tab.groupId === undefined || tab.groupId === -1) return
     const wsId = workspaceByGroup(workspaces).get(tab.groupId)
     if (!wsId) return
@@ -121,7 +123,7 @@ chrome.tabs.onActivated.addListener(async (info) => {
     } else if (activeWs) {
       return // deliberately parked on an empty workspace — hold
     }
-    await chrome.storage.local.set({ activeWorkspaceId: wsId })
+    await setWindowActiveWorkspace(info.windowId, wsId)
   } catch {
     // tab already gone
   }
@@ -137,7 +139,9 @@ chrome.tabs.onCreated.addListener(async (tab) => {
     const win = await chrome.windows.get(tab.windowId)
     if (win.type !== 'normal') return
 
-    const { workspaces, activeId } = await loadWorkspaces()
+    // Adopt into the active workspace OF THIS TAB'S WINDOW — otherwise a new
+    // tab in window B would be grouped into window A's active workspace.
+    const { workspaces, activeId } = await loadWorkspaces(tab.windowId)
     const active = workspaces.find((w) => w.id === activeId)
     if (!active) return
 
@@ -208,10 +212,14 @@ chrome.tabs.onRemoved.addListener(async (tabId, removeInfo) => {
 // The panel asks the worker to activate workspaces so switches survive the
 // panel's own document being swapped out mid-animation.
 chrome.runtime.onMessage.addListener((msg) => {
+  const windowId = typeof msg?.windowId === 'number' ? msg.windowId : undefined
   if (msg?.type === 'activate-workspace' && typeof msg.id === 'string') {
-    void activateWorkspace(msg.id).catch(() => {})
+    void activateWorkspace(msg.id, windowId).catch(() => {})
   } else if (msg?.type === 'create-workspace') {
-    void createWorkspace(typeof msg.name === 'string' ? msg.name : undefined).catch(() => {})
+    void createWorkspace(
+      typeof msg.name === 'string' ? msg.name : undefined,
+      windowId
+    ).catch(() => {})
   }
 })
 
