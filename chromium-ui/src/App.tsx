@@ -33,6 +33,7 @@ export default function App(): JSX.Element {
   const [rename, setRename] = useState<{ kind: 'space' | 'folder'; id: string } | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [dialog, setDialog] = useState<DialogState | null>(null)
+  const [updateReady, setUpdateReady] = useState<string | null>(null)
   const [slide, setSlide] = useState<'left' | 'right' | null>(null)
   const prevSpace = useRef<{ id: string | null; index: number }>({ id: null, index: 0 })
   // Last right-click position — the adapter's showContextMenu carries no coords.
@@ -99,6 +100,33 @@ export default function App(): JSX.Element {
     prevSpace.current = { id: state.activeSpaceId, index: Math.max(0, index) }
   }, [state.activeSpaceId, state.spaces])
 
+  // Self-update, Arc-style: when the 6-hourly check finds a new version the
+  // panel silently kicks off the native download+staging; the ONLY thing the
+  // user ever sees is the "Restart to update" pill once it's ready. Status is
+  // polled — the native updater's raw value-store writes fire no events.
+  useEffect(() => {
+    const tick = async (): Promise<void> => {
+      const { updateInfo, glintUpdateStatus, autoDownloadedVersion } =
+        await chrome.storage.local.get([
+          'updateInfo',
+          'glintUpdateStatus',
+          'autoDownloadedVersion'
+        ])
+      const info = updateInfo as { version?: string; zipUrl?: string } | null
+      const st = (glintUpdateStatus as { state?: string } | null)?.state
+      setUpdateReady(st === 'downloaded' ? (info?.version ?? '') : null)
+      if (!info?.zipUrl || !info.version) return
+      if (st === 'downloading' || st === 'downloaded') return
+      if (autoDownloadedVersion === info.version) return
+      await chrome.storage.local.set({ autoDownloadedVersion: info.version })
+      window.location.href =
+        'glint://update-start/' + encodeURIComponent(info.zipUrl)
+    }
+    void tick()
+    const id = setInterval(tick, 5_000)
+    return () => clearInterval(id)
+  }, [])
+
   // Zen-style gesture: horizontal scroll over the sidebar switches
   // workspace. Lives in the panel, so it only fires with the pointer here.
   useEffect(() => {
@@ -159,6 +187,17 @@ export default function App(): JSX.Element {
       )}
 
       {dialog && <GlintDialog dialog={dialog} onClose={() => setDialog(null)} />}
+
+      {updateReady !== null && (
+        <button
+          className="update-pill"
+          onClick={() => {
+            window.location.href = 'glint://update-restart'
+          }}
+        >
+          Restart to update{updateReady ? ` · Glint ${updateReady}` : ''}
+        </button>
+      )}
     </div>
   )
 }

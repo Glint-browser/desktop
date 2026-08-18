@@ -1918,3 +1918,25 @@ body {
   --text-dim: rgba(255, 255, 255, 0.78);
   --divider: rgba(255, 255, 255, 0.22);
 }
+
+/* ---- Self-update pill: the only update UI the user ever sees ---- */
+.update-pill {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 44px;
+  z-index: 260;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: none;
+  background: var(--accent, #6d5bd0);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  animation: dlg-pop 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+.update-pill:hover {
+  filter: brightness(1.08);
+}
