@@ -34,7 +34,10 @@ export async function runUpdateCheck(): Promise<UpdateInfo | null> {
     const latest = String(rel.tag_name ?? '').replace(/^v/, '')
     const current = chrome.runtime.getManifest().version
     if (!latest || !newerThan(latest, current)) {
-      await chrome.storage.local.set({ updateInfo: null })
+      // Up to date: also clear any stale self-updater status — a staged
+      // build from BEFORE a manual install would otherwise leave the
+      // "Restart to update" pill showing forever.
+      await chrome.storage.local.set({ updateInfo: null, glintUpdateStatus: null })
       return null
     }
     const assets = rel.assets as

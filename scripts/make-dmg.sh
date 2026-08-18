@@ -23,9 +23,17 @@ for c in glint_ui glint_ublock glint_schibsted; do
   echo "baked: $c"
 done
 
-# 2) Re-sign ad-hoc: baking resources broke the bundle seals. No hardened
-#    runtime => no entitlement/library-validation concerns.
-codesign --force --deep --sign - "$APP" 2>&1 | tail -1 || true
+# 2) Re-sign. Prefer the stable "Glint Signing" identity (self-signed, in
+#    the login keychain): a CONSTANT identity means macOS keychain ACLs
+#    ("Chromium Safe Storage") survive updates — users approve once instead
+#    of after every version. Falls back to ad-hoc when absent.
+if security find-certificate -c "Glint Signing" >/dev/null 2>&1; then
+  SIGN_ID="Glint Signing"
+else
+  SIGN_ID="-"
+fi
+echo "signing with: $SIGN_ID"
+codesign --force --deep --sign "$SIGN_ID" "$APP" 2>&1 | tail -1 || true
 
 # 3) Wrap in a dmg with an Applications shortcut. Staged dir = volume root.
 #    hdiutil create, not pkg-dmg: pkg-dmg's HFS-hybrid path pollutes files

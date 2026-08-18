@@ -114,6 +114,13 @@ export default function App(): JSX.Element {
         ])
       const info = updateInfo as { version?: string; zipUrl?: string } | null
       const st = (glintUpdateStatus as { state?: string } | null)?.state
+      if (st === 'downloaded' && !info?.version) {
+        // Stale staging from before a manual install — no update is actually
+        // available. Clear it so the pill disappears.
+        await chrome.storage.local.set({ glintUpdateStatus: null })
+        setUpdateReady(null)
+        return
+      }
       setUpdateReady(st === 'downloaded' ? (info?.version ?? '') : null)
       if (!info?.zipUrl || !info.version) return
       if (st === 'downloading' || st === 'downloaded') return
