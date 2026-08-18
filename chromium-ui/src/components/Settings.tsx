@@ -523,12 +523,19 @@ function ProfilesPane(): JSX.Element {
       .filter(Boolean)
   )
 
+  // Two-step confirm rather than window.confirm(): deleting a profile wipes
+  // its logins for good, and JS dialogs are unreliable in Glint's chromeless
+  // windows (they are silently suppressed in some contexts).
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+
   const removeProfile = (name: string): void => {
-    if (!window.confirm(`Delete the profile "${name}"? Its logins and data are removed.`)) {
+    if (pendingDelete !== name) {
+      setPendingDelete(name)
       return
     }
     applyNative(`delete-profile/${encodeURIComponent(name)}`)
     setGlintProfiles((list) => list.filter((n) => n !== name))
+    setPendingDelete(null)
   }
 
   return (
@@ -553,13 +560,27 @@ function ProfilesPane(): JSX.Element {
                 {name.slice(0, 4).toUpperCase()}
               </span>
               <span className="row-label">{name}</span>
-              <button
-                className="settings-btn danger icon"
-                title={`Delete "${name}"`}
-                onClick={() => removeProfile(name)}
-              >
-                <Trash size={14} />
-              </button>
+              {pendingDelete === name ? (
+                <>
+                  <span className="row-desc" style={{ margin: '0 8px 0 auto' }}>
+                    Delete “{name}” and its logins?
+                  </span>
+                  <button className="settings-btn" onClick={() => setPendingDelete(null)}>
+                    Cancel
+                  </button>
+                  <button className="settings-btn danger" onClick={() => removeProfile(name)}>
+                    Delete
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="settings-btn danger icon"
+                  title={`Delete "${name}"`}
+                  onClick={() => removeProfile(name)}
+                >
+                  <Trash size={14} />
+                </button>
+              )}
             </div>
           ))
         )}
