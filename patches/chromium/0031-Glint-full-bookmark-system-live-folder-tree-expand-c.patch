@@ -1,7 +1,7 @@
 From a122dc2249e93a6da15e18476b6044e5d6c0f8f7 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 15:12:55 +0200
-Subject: [PATCH 31/65] Glint: full bookmark system - live folder tree,
+Subject: [PATCH 31/66] Glint: full bookmark system - live folder tree,
  expand/collapse, remove buttons, auto-refresh via BookmarkModelObserver
 
 ---

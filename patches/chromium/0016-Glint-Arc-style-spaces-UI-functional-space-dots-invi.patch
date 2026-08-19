@@ -1,7 +1,7 @@
 From a0fc57b0423a0275ecbd79e926f7da21686e7cec Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Mon, 6 Jul 2026 20:04:41 +0200
-Subject: [PATCH 16/65] Glint: Arc-style spaces UI - functional space dots,
+Subject: [PATCH 16/66] Glint: Arc-style spaces UI - functional space dots,
  invisible group chrome, transparent inactive tabs, bookmarks row, new-tab
  address focus
 

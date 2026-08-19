@@ -1,0 +1,511 @@
+From 285b96cab7a02de994a437539b3ba840cbd8e75e Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Wed, 19 Aug 2026 14:14:54 +0200
+Subject: [PATCH 66/66] =?UTF-8?q?Glint:=20profile=20tag=20survives=20redir?=
+ =?UTF-8?q?ects=20=E2=80=94=20observe=20tab=20strips,=20tag=20by=20real=20?=
+ =?UTF-8?q?profile?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The profile-tag tracker now derives glintProfileTabs from each tab's actual
+BrowserContext and observes every window's tab strip, so a link that redirects
+into a new tab (SSO/OAuth window.open, target=_blank), a same-tab redirect, a
+restored tab, or a tab opened in another window is badged immediately instead
+of silently losing its tag. Display names persist in glintProfileNames so the
+badge keeps its casing (and hashed colour) across restarts. The tracker is
+re-armed per window from ExtensionSidePanelCoordinator (matched by extension
+id, not display name) and tears down on profile destruction (ProfileObserver)
+to avoid a dangling raw_ptr.
+
+Adds a gated glint://open-profile/<name>/<url> bridge command (same
+initiating-origin check as the other glint:// actions) so the panel — and
+CDP-driven tests — can open a profile tab without the native palette.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ .../browser/chrome_content_browser_client.cc  |  23 ++
+ .../ui/views/glint/glint_command_palette.cc   | 298 +++++++++++++++---
+ .../ui/views/glint/glint_command_palette.h    |   6 +
+ .../extension_side_panel_coordinator.cc       |   8 +-
+ 4 files changed, 287 insertions(+), 48 deletions(-)
+
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index ec5b4c6118..1b3c49f5ee 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -46,6 +46,7 @@
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/stringprintf.h"
++#include "base/strings/utf_string_conversions.h"
+ #include "base/supports_user_data.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/types/expected.h"
+@@ -7347,6 +7348,28 @@ bool ChromeContentBrowserClient::HandleExternalProtocol(
+       } else if (base::StartsWith(glint_spec, "glint://delete-profile/")) {
+         glint::DeleteGlintProfile(base::UnescapeBinaryURLComponent(
+             glint_spec.substr(strlen("glint://delete-profile/"))));
++      } else if (base::StartsWith(glint_spec, "glint://open-profile/")) {
++        // glint://open-profile/<name>/<url-encoded url>: the same action as
++        // the palette's "/profile <name> <url>" — opens the URL as a tab of
++        // the isolated glint-<name> profile in the panel's window/workspace.
++        const std::string rest =
++            glint_spec.substr(strlen("glint://open-profile/"));
++        const size_t slash = rest.find('/');
++        const std::string name = base::UnescapeBinaryURLComponent(
++            slash == std::string::npos ? rest : rest.substr(0, slash));
++        const std::string target =
++            slash == std::string::npos
++                ? std::string()
++                : base::UnescapeBinaryURLComponent(rest.substr(slash + 1));
++        auto* glint_collection =
++            ProfileBrowserCollection::GetForProfile(glint_profile);
++        BrowserWindowInterface* glint_bwi =
++            glint_collection ? glint_collection->GetLastActiveBrowser()
++                             : nullptr;
++        if (glint_bwi && !name.empty() && !target.empty()) {
++          glint::OpenUrlInGlintProfile(glint_bwi->GetBrowserForMigrationOnly(),
++                                       name, base::UTF8ToUTF16(target));
++        }
+       } else if (base::StartsWith(glint_spec, "glint://adblock-settings")) {
+         auto* glint_collection =
+             ProfileBrowserCollection::GetForProfile(glint_profile);
+diff --git a/chrome/browser/ui/views/glint/glint_command_palette.cc b/chrome/browser/ui/views/glint/glint_command_palette.cc
+index 5fcab9d2ef..0c0dc23779 100644
+--- a/chrome/browser/ui/views/glint/glint_command_palette.cc
++++ b/chrome/browser/ui/views/glint/glint_command_palette.cc
+@@ -47,6 +47,15 @@
+ #include <map>
+ 
+ #include "base/no_destructor.h"
++#include "base/scoped_observation.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/task/single_thread_task_runner.h"
++#include "chrome/browser/profiles/profile_observer.h"
++#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
++#include "components/sessions/core/session_id.h"
++#include "components/value_store/value_store.h"
++#include <optional>
++#include <set>
+ #include "base/json/json_writer.h"
+ #include "base/timer/timer.h"
+ #include "chrome/browser/extensions/extension_util.h"
+@@ -827,53 +836,167 @@ void DeleteGlintProfile(const std::string& name) {
+ }
+ 
+ // Glint: keeps the sidebar's tabId -> profile-name map ("glintProfileTabs")
+-// correct by deriving it from each tab's ACTUAL profile, across every window,
+-// on a short timer. A one-shot write at open time lost the tag whenever a
+-// link redirected into a new tab (SSO/OAuth popups) or the tab was restored,
+-// and never cleaned up closed tabs. This scans ground truth instead, and only
+-// writes when the map actually changed. (This fork has no BrowserListObserver,
+-// so a 2s timer over GetAllBrowserWindowInterfaces() covers new windows too.)
+-class GlintProfileTagTracker {
++// correct by deriving it from each tab's ACTUAL profile (its BrowserContext),
++// across every window. Design:
++//  - It OBSERVES every window's tab strip, so a link that redirects into a NEW
++//    tab (SSO/OAuth popups, target=_blank, window.open) is tagged the moment
++//    the tab is inserted — not up to 2 s later, and never only "at open time"
++//    (the original one-shot write lost the tag on exactly those flows).
++//  - It is (re)started for every window that hosts the Glint UI panel (see
++//    StartProfileTagTracker), including the FIRST window after a restart, so
++//    session-restored profile tabs are tagged without a fresh /profile.
++//  - A short timer stays as a safety net while profile tabs exist (windows
++//    or tabs this code never observed, e.g. restored before the hook ran) and
++//    stops when there are none; any Start/insert restarts it.
++//  - Display names ("Cenik", as typed) are persisted in the extension's
++//    storage ("glintProfileNames") so the badge keeps its casing — and thus
++//    its colour, which hashes the name — across restarts.
++//  - Only writes when the map actually changed. The map lives in the
++//    ORIGINAL (sidebar-hosting) profile's extension storage — never in a
++//    glint-* tab profile's.
++class GlintProfileTagTracker : public TabStripModelObserver,
++                               public ProfileObserver {
+  public:
+   static GlintProfileTagTracker* Get() {
+     static base::NoDestructor<GlintProfileTagTracker> instance;
+     return instance.get();
+   }
+ 
+-  // Idempotent. Remembers the original profile whose extension storage we
+-  // write into, (re)starts the timer, and rebuilds immediately.
+-  void Start(Profile* original) {
+-    original_ = original;
+-    Rebuild();
+-    if (!timer_.IsRunning()) {
+-      timer_.Start(FROM_HERE, base::Seconds(2), this,
+-                   &GlintProfileTagTracker::Rebuild);
++  // Idempotent. `browser` hosts the Glint UI panel; its original profile's
++  // extension storage is where the map is written. Observes the browser's
++  // tab strip (and any other live browser's), loads persisted names on first
++  // use, and rebuilds now.
++  void Start(Browser* browser) {
++    if (!browser) {
++      return;
++    }
++    Profile* original = browser->profile()->GetOriginalProfile();
++    // A glint-* tab profile must never become the storage target: the map
++    // belongs to the profile whose sidebar shows the tabs.
++    if (IsGlintTabProfile(original)) {
++      return;
++    }
++    if (original_ != original) {
++      profile_observation_.Reset();
++      original_ = original;
++      profile_observation_.Observe(original);
++      last_written_.clear();
++      names_loaded_ = false;
++    }
++    ObserveAllBrowsers();
++    if (!names_loaded_) {
++      names_loaded_ = true;
++      LoadNames();
+     }
++    Rebuild();
++    EnsureTimer();
+   }
+ 
+   // Records the exact name the user typed, so the badge shows "Mimic" rather
+-  // than the sanitized profile-dir spelling for tabs opened this session.
++  // than the sanitized profile-dir spelling. Persisted with the next write.
+   void NoteName(const std::string& dir_suffix, const std::string& display) {
+-    names_[dir_suffix] = display;
++    if (names_[dir_suffix] != display) {
++      names_[dir_suffix] = display;
++      names_dirty_ = true;
++    }
++  }
++
++  // TabStripModelObserver:
++  void OnTabStripModelChanged(
++      TabStripModel* tab_strip_model,
++      const TabStripModelChange& change,
++      const TabStripSelectionChange& selection) override {
++    if (change.type() == TabStripModelChange::kInserted ||
++        change.type() == TabStripModelChange::kRemoved ||
++        change.type() == TabStripModelChange::kReplaced) {
++      ScheduleRebuild();
++    }
++  }
++  void OnTabStripModelDestroyed(TabStripModel* tab_strip_model) override {
++    observed_.erase(tab_strip_model);
++    ScheduleRebuild();
++  }
++
++  // ProfileObserver:
++  void OnProfileWillBeDestroyed(Profile* profile) override {
++    if (profile != original_) {
++      return;
++    }
++    // The storage target is going away (shutdown): stop everything that
++    // could touch it from a later task.
++    profile_observation_.Reset();
++    original_ = nullptr;
++    timer_.Stop();
++    TabStripModelObserver::StopObservingAll(this);
++    observed_.clear();
+   }
+ 
+  private:
+   friend class base::NoDestructor<GlintProfileTagTracker>;
+   GlintProfileTagTracker() = default;
+-  ~GlintProfileTagTracker() = default;
++  ~GlintProfileTagTracker() override = default;
++
++  static bool IsGlintTabProfile(const Profile* profile) {
++    return profile->GetPath().BaseName().AsUTF8Unsafe().rfind("glint-", 0) ==
++           0;
++  }
++
++  void ObserveAllBrowsers() {
++    for (BrowserWindowInterface* bwi : GetAllBrowserWindowInterfaces()) {
++      Browser* browser = bwi->GetBrowserForMigrationOnly();
++      if (!browser) {
++        continue;
++      }
++      TabStripModel* tab_strip = browser->tab_strip_model();
++      if (observed_.insert(tab_strip).second) {
++        tab_strip->AddObserver(this);
++      }
++    }
++  }
++
++  void EnsureTimer() {
++    if (!timer_.IsRunning()) {
++      timer_.Start(FROM_HERE, base::Seconds(2), this,
++                   &GlintProfileTagTracker::Rebuild);
++    }
++    idle_ticks_ = 0;
++  }
++
++  // Coalesces bursts of tab-strip changes into one rebuild on the next turn
++  // (tab helpers are attached by then, and the write is async anyway).
++  void ScheduleRebuild() {
++    if (!original_ || rebuild_pending_) {
++      return;
++    }
++    rebuild_pending_ = true;
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(&GlintProfileTagTracker::RebuildFromTask,
++                                  base::Unretained(this)));
++  }
++
++  void RebuildFromTask() {
++    rebuild_pending_ = false;
++    Rebuild();
++    EnsureTimer();
++  }
+ 
+   void Rebuild() {
+     if (!original_) {
+       return;
+     }
+     base::DictValue map;
+-    int empty_streak_had_tabs = 0;
++    int profile_tabs = 0;
+     for (BrowserWindowInterface* bwi : GetAllBrowserWindowInterfaces()) {
+       Browser* browser = bwi->GetBrowserForMigrationOnly();
+       if (!browser) {
+         continue;
+       }
+       TabStripModel* tab_strip = browser->tab_strip_model();
++      // New windows can appear between Start calls (e.g. ⌘N): pick them up
++      // here so the safety-net timer also repairs the observer set.
++      if (observed_.insert(tab_strip).second) {
++        tab_strip->AddObserver(this);
++      }
+       for (int i = 0; i < tab_strip->count(); ++i) {
+         content::WebContents* contents = tab_strip->GetWebContentsAt(i);
+         if (!contents) {
+@@ -881,30 +1004,32 @@ class GlintProfileTagTracker {
+         }
+         Profile* profile =
+             Profile::FromBrowserContext(contents->GetBrowserContext());
+-        const std::string dir = profile->GetPath().BaseName().AsUTF8Unsafe();
+-        if (dir.rfind("glint-", 0) != 0) {
++        if (!IsGlintTabProfile(profile)) {
+           continue;
+         }
+-        ++empty_streak_had_tabs;
++        const std::string dir = profile->GetPath().BaseName().AsUTF8Unsafe();
++        ++profile_tabs;
+         const std::string suffix = dir.substr(strlen("glint-"));
+         const auto it = names_.find(suffix);
+-        const int tab_id =
+-            sessions::SessionTabHelper::IdForTab(contents).id();
+-        map.Set(base::NumberToString(tab_id),
++        const SessionID tab_id = sessions::SessionTabHelper::IdForTab(contents);
++        if (!tab_id.is_valid()) {
++          continue;
++        }
++        map.Set(base::NumberToString(tab_id.id()),
+                 it != names_.end() ? it->second : suffix);
+       }
+     }
+ 
+     std::string serialized;
+     base::JSONWriter::Write(map, &serialized);
+-    if (serialized != last_written_) {
++    if (serialized != last_written_ || names_dirty_) {
+       last_written_ = serialized;
+       WriteMap(std::move(map));
+     }
+ 
+     // Stop scanning once there have been no profile tabs for two ticks — the
+-    // next /profile open restarts the timer.
+-    if (empty_streak_had_tabs == 0) {
++    // next Start / tab-strip change restarts the timer.
++    if (profile_tabs == 0) {
+       if (++idle_ticks_ >= 2) {
+         timer_.Stop();
+         idle_ticks_ = 0;
+@@ -914,37 +1039,117 @@ class GlintProfileTagTracker {
+     }
+   }
+ 
++  // The Glint UI component in the original profile, or null.
++  scoped_refptr<const extensions::Extension> GlintUiExtension() const {
++    if (!original_) {
++      return nullptr;
++    }
++    const extensions::Extension* extension =
++        extensions::ExtensionRegistry::Get(original_)
++            ->enabled_extensions()
++            .GetByID(kGlintUiExtensionId);
++    return extension ? base::WrapRefCounted(extension) : nullptr;
++  }
++
+   void WriteMap(base::DictValue map) {
+-    const extensions::ExtensionSet& extension_set =
+-        extensions::ExtensionRegistry::Get(original_)->enabled_extensions();
+-    for (const auto& extension : extension_set) {
+-      if (extension->id() != kGlintUiExtensionId) {
+-        continue;
+-      }
+-      extensions::StorageFrontend* frontend =
+-          extensions::StorageFrontend::Get(original_);
+-      if (!frontend) {
+-        return;
++    scoped_refptr<const extensions::Extension> extension = GlintUiExtension();
++    extensions::StorageFrontend* frontend =
++        extensions::StorageFrontend::Get(original_);
++    if (!extension || !frontend) {
++      return;
++    }
++    std::optional<base::DictValue> names;
++    if (names_dirty_) {
++      names_dirty_ = false;
++      base::DictValue dict;
++      for (const auto& [suffix, display] : names_) {
++        dict.Set(suffix, display);
+       }
+-      frontend->RunWithStorage(
+-          extension, extensions::settings_namespace::LOCAL,
+-          base::BindOnce(
+-              [](base::DictValue map, value_store::ValueStore* store) {
++      names = std::move(dict);
++    }
++    // The callback runs on the storage backend sequence — it only touches
++    // the ValueStore it is handed.
++    frontend->RunWithStorage(
++        extension, extensions::settings_namespace::LOCAL,
++        base::BindOnce(
++            [](base::DictValue map, std::optional<base::DictValue> names,
++               value_store::ValueStore* store) {
++              store->Set(value_store::ValueStore::DEFAULTS,
++                         "glintProfileTabs", base::Value(std::move(map)));
++              if (names) {
+                 store->Set(value_store::ValueStore::DEFAULTS,
+-                           "glintProfileTabs", base::Value(std::move(map)));
+-              },
+-              std::move(map)));
++                           "glintProfileNames",
++                           base::Value(std::move(*names)));
++              }
++            },
++            std::move(map), std::move(names)));
++  }
++
++  // Reads the persisted display names (backend sequence) and merges them on
++  // the UI thread; typed names from this session win over stored ones.
++  void LoadNames() {
++    scoped_refptr<const extensions::Extension> extension = GlintUiExtension();
++    extensions::StorageFrontend* frontend =
++        extensions::StorageFrontend::Get(original_);
++    if (!extension || !frontend) {
+       return;
+     }
++    frontend->RunWithStorage(
++        extension, extensions::settings_namespace::LOCAL,
++        base::BindOnce(
++            [](scoped_refptr<base::SequencedTaskRunner> ui_runner,
++               value_store::ValueStore* store) {
++              value_store::ValueStore::ReadResult result =
++                  store->Get("glintProfileNames");
++              base::DictValue names;
++              if (result.status().ok()) {
++                base::DictValue settings = result.PassSettings();
++                if (base::DictValue* dict =
++                        settings.FindDict("glintProfileNames")) {
++                  names = std::move(*dict);
++                }
++              }
++              ui_runner->PostTask(
++                  FROM_HERE,
++                  base::BindOnce(&GlintProfileTagTracker::OnNamesLoaded,
++                                 base::Unretained(Get()), std::move(names)));
++            },
++            base::SequencedTaskRunner::GetCurrentDefault()));
++  }
++
++  void OnNamesLoaded(base::DictValue names) {
++    bool changed = false;
++    for (const auto [suffix, value] : names) {
++      if (!value.is_string() || names_.count(suffix)) {
++        continue;
++      }
++      names_[suffix] = value.GetString();
++      changed = true;
++    }
++    if (changed && original_) {
++      // Re-stamp tabs that were written with the bare suffix before the
++      // names arrived (first scan after a restart).
++      last_written_.clear();
++      Rebuild();
++    }
+   }
+ 
+   raw_ptr<Profile> original_ = nullptr;
++  base::ScopedObservation<Profile, ProfileObserver> profile_observation_{this};
++  std::set<raw_ptr<TabStripModel, SetExperimental>> observed_;
+   base::RepeatingTimer timer_;
++  bool rebuild_pending_ = false;
++  bool names_loaded_ = false;
++  bool names_dirty_ = false;
+   std::string last_written_;
+   int idle_ticks_ = 0;
+   std::map<std::string, std::string> names_;
+ };
+ 
++void StartProfileTagTracker(Browser* browser) {
++  GlintProfileTagTracker::Get()->Start(browser);
++}
++
+ void OpenUrlInGlintProfile(Browser* browser,
+                            const std::string& profile_name,
+                            const std::u16string& url_text) {
+@@ -982,9 +1187,8 @@ void OpenUrlInGlintProfile(Browser* browser,
+   for (char c : profile_name) {
+     dir_suffix += base::IsAsciiAlphaNumeric(c) ? base::ToLowerASCII(c) : '-';
+   }
+-  Profile* original = browser->profile()->GetOriginalProfile();
+   GlintProfileTagTracker::Get()->NoteName(dir_suffix, profile_name);
+-  GlintProfileTagTracker::Get()->Start(original);
++  GlintProfileTagTracker::Get()->Start(browser);
+ }
+ 
+ void ActivateAdjacentWorkspace(Browser* browser, int delta) {
+diff --git a/chrome/browser/ui/views/glint/glint_command_palette.h b/chrome/browser/ui/views/glint/glint_command_palette.h
+index fe1e6f6d1d..68d0bb1ce4 100644
+--- a/chrome/browser/ui/views/glint/glint_command_palette.h
++++ b/chrome/browser/ui/views/glint/glint_command_palette.h
+@@ -52,6 +52,12 @@ void OpenUrlInGlintProfile(Browser* browser,
+ 
+ // Names of existing Glint profiles ("glint-*" profile directories),
+ // prefix stripped.
++// Glint: (re)starts the sidebar's profile-tag tracker for a window that
++// hosts the Glint UI panel. Idempotent and cheap — call it for EVERY such
++// window (creation, restore, restart), so tabs living in glint-* profiles are
++// badged from the moment the sidebar exists, not only after a /profile open.
++void StartProfileTagTracker(Browser* browser);
++
+ std::vector<std::string> GetGlintProfileNames();
+ 
+ // glint://delete-profile/<name> — closes the profile's tabs everywhere and
+diff --git a/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.cc b/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.cc
+index 9a100bf3d6..3f0768fd64 100644
+--- a/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.cc
++++ b/chrome/browser/ui/views/side_panel/extensions/extension_side_panel_coordinator.cc
+@@ -18,6 +18,8 @@
+ #include "chrome/browser/ui/side_panel/side_panel_ui.h"
+ #include "chrome/browser/ui/ui_features.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/glint/glint_command_palette.h"
++#include "chrome/browser/ui/views/glint/glint_ids.h"
+ #include "chrome/common/extensions/api/side_panel.h"
+ #include "content/public/browser/browser_context.h"
+ #include "content/public/browser/render_widget_host_view.h"
+@@ -247,7 +249,11 @@ void ExtensionSidePanelCoordinator::CreateAndRegisterEntry() {
+   // as its window-scoped entry is registered (window creation / extension
+   // load) instead of waiting for a toolbar click. Posted, not inline: the
+   // side panel UI may still be mid-initialization during registration.
+-  if (browser_ && extension_->name() == "Glint UI") {
++  if (browser_ && extension_->id() == glint::kGlintUiExtensionId) {
++    // Glint: every window that hosts the sidebar keeps the profile-tag
++    // tracker alive (tabs in glint-* profiles get their badge), including
++    // the first window after a restart.
++    glint::StartProfileTagTracker(browser_->GetBrowserForMigrationOnly());
+     base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+         FROM_HERE,
+         base::BindOnce(&ExtensionSidePanelCoordinator::MaybeAutoShowGlintPanel,

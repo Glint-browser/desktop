@@ -1,7 +1,7 @@
 From aacb26ba6a4a5fa732315a92b436a447e8e209b7 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Tue, 11 Aug 2026 08:18:54 +0200
-Subject: [PATCH 38/65] Glint: suppress Google-API-keys infobar (ships without
+Subject: [PATCH 38/66] Glint: suppress Google-API-keys infobar (ships without
  Google keys by design)
 
 ---

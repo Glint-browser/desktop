@@ -1,7 +1,7 @@
 From eddbf495e805f4487695175dfdca19ce2c01d437 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Tue, 18 Aug 2026 08:51:47 +0200
-Subject: [PATCH 63/65] Glint: palette treats scheme URLs (glint://, etc.) as
+Subject: [PATCH 63/66] Glint: palette treats scheme URLs (glint://, etc.) as
  URLs, not searches
 
 The URL heuristic required a dot, so scheme-only inputs like

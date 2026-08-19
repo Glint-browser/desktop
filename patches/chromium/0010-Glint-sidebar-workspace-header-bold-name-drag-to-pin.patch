@@ -1,7 +1,7 @@
 From a7c44a9f1112ab129a93d4708f3e6f5fdaa676e4 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Sun, 5 Jul 2026 23:33:21 +0200
-Subject: [PATCH 10/65] Glint: sidebar workspace header (bold name +
+Subject: [PATCH 10/66] Glint: sidebar workspace header (bold name +
  drag-to-pin hint)
 
 ---

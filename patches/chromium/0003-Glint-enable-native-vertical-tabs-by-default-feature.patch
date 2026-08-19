@@ -1,7 +1,7 @@
 From 69d356dcd73bca0e43c20a9822a367197e872544 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Sat, 4 Jul 2026 18:38:12 +0200
-Subject: [PATCH 03/65] Glint: enable native vertical tabs by default (feature
+Subject: [PATCH 03/66] Glint: enable native vertical tabs by default (feature
  + pref); drop manual sidebar gap
 
 ---

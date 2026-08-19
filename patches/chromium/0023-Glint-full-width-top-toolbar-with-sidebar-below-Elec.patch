@@ -1,7 +1,7 @@
 From 3f557d4b90eca8ec4169f5317ba6d8b505eed108 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 09:42:52 +0200
-Subject: [PATCH 23/65] Glint: full-width top toolbar with sidebar below
+Subject: [PATCH 23/66] Glint: full-width top toolbar with sidebar below
  (Electron layout) + expandable Bookmark folder in sidebar
 
 ---

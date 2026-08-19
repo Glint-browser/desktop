@@ -1,7 +1,7 @@
 From f82a5ff8e8c4f6d6be6ed9de091e12af76f5e360 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Mon, 17 Aug 2026 08:45:02 +0200
-Subject: [PATCH 61/65] Glint: survive oversized group titles + stop
+Subject: [PATCH 61/66] Glint: survive oversized group titles + stop
  tracked-pref extension purges
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
