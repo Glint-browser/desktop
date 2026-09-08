@@ -3,6 +3,7 @@ import { StrictMode, useEffect, useState, type JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AppSettings } from './types'
 import { Settings } from './components/Settings'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { applyThemeAttribute } from './workspaces'
 import './styles.css'
 
@@ -32,6 +33,8 @@ function SettingsPage(): JSX.Element {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <SettingsPage />
+    <ErrorBoundary surface="settings">
+      <SettingsPage />
+    </ErrorBoundary>
   </StrictMode>
 )

@@ -12,6 +12,8 @@
  * (adoption, reconcile, active-follow).
  */
 
+import { restoreIfWiped, writeBackup } from './lib/backup'
+
 export interface Workspace {
   id: string
   name: string
@@ -147,6 +149,9 @@ async function saveWorkspaces(
   if (windowId !== undefined) {
     await setWindowActiveWorkspace(windowId, activeId)
   }
+  // Keep the durable backup current (local snapshot + throttled storage.sync
+  // mirror) so a later crash/corruption self-heals instead of wiping spaces.
+  void writeBackup().catch(() => {})
 }
 
 async function currentWindowId(): Promise<number> {
@@ -179,6 +184,10 @@ export async function reconcileWorkspaces(windowId?: number): Promise<WorkspaceS
     const stored = await loadWorkspaces()
     return { workspaces: stored.workspaces, activeId: stored.activeId ?? '' }
   }
+  // Self-heal BEFORE reading: if the registry was wiped (crash/LevelDB
+  // corruption) but a durable backup has real workspaces, restore it so we
+  // never cement a fresh "Personal" over the lost spaces. No-op when healthy.
+  await restoreIfWiped().catch(() => null)
   const groups = await chrome.tabGroups.query({ windowId: win })
   const { workspaces, activeId } = await loadWorkspaces(win)
   const before = JSON.stringify({ workspaces, activeId })

@@ -86,7 +86,7 @@ export function PinnedBookmarks({
         title={label}
       >
         <span className="pin-icon">
-          {tab.favicon ? <img src={tab.favicon} alt="" width={18} height={18} /> : <span className="favicon-fallback" />}
+          {tab.favicon ? <img src={tab.favicon} alt="" width={19} height={19} /> : <span className="favicon-fallback" />}
         </span>
         <span className="pin-label">{label}</span>
       </div>
@@ -111,7 +111,7 @@ export function PinnedBookmarks({
       title={`${b.title} — right-click to remove`}
     >
       <span className="pin-icon">
-        {b.favicon ? <img src={b.favicon} alt="" width={18} height={18} /> : <span className="favicon-fallback" />}
+        {b.favicon ? <img src={b.favicon} alt="" width={19} height={19} /> : <span className="favicon-fallback" />}
       </span>
       <span className="pin-label">{b.title}</span>
     </div>

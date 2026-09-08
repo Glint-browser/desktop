@@ -1,7 +1,7 @@
 From 285b96cab7a02de994a437539b3ba840cbd8e75e Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 19 Aug 2026 14:14:54 +0200
-Subject: [PATCH 66/66] =?UTF-8?q?Glint:=20profile=20tag=20survives=20redir?=
+Subject: [PATCH 66/67] =?UTF-8?q?Glint:=20profile=20tag=20survives=20redir?=
  =?UTF-8?q?ects=20=E2=80=94=20observe=20tab=20strips,=20tag=20by=20real=20?=
  =?UTF-8?q?profile?=
 MIME-Version: 1.0

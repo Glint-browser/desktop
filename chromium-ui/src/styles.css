@@ -199,10 +199,12 @@ body.platform-linux .topbar {
   display: flex;
   align-items: center;
   gap: 4px;
-  height: 32px;
-  padding: 0 6px 0 12px;
-  border-radius: 9px;
+  height: 36px;
+  padding: 0 8px 0 14px;
+  border-radius: 10px;
   background: var(--panel);
+  overflow: hidden;
+  min-width: 0;
 }
 
 .address-bar:focus-within {
@@ -212,6 +214,10 @@ body.platform-linux .topbar {
 
 .address-input {
   flex: 1;
+  /* Without min-width:0 a flex input refuses to shrink below its intrinsic
+     width and pushes the trailing buttons outside the pill. */
+  min-width: 0;
+  width: 0;
   height: 100%;
   border: none;
   background: transparent;
@@ -226,6 +232,7 @@ body.platform-linux .topbar {
 }
 
 .addr-star {
+  flex-shrink: 0;
   width: 24px;
   height: 24px;
   border: none;
@@ -294,11 +301,13 @@ body.platform-linux .topbar {
 
 /* ---------- Favorites row (icon-only pinned sites) ---------- */
 .favorites-row {
-  display: flex;
-  flex-wrap: wrap;
+  /* Zen-style: exactly three tiles per row, sized to fill the sidebar width
+     (a flex-wrap row let a 4th squeeze in and made every tile look cramped). */
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   align-items: center;
-  gap: 8px;
-  padding: 4px 4px 8px;
+  gap: 10px;
+  padding: 6px 4px 10px;
   border-radius: 12px;
 }
 
@@ -314,6 +323,7 @@ body.platform-linux .topbar {
 }
 
 .fav-hint {
+  grid-column: 1 / -1;
   font-size: 11px;
   color: var(--text-dim);
   opacity: 0.6;
@@ -321,14 +331,18 @@ body.platform-linux .topbar {
 }
 
 .fav-tile {
-  width: 44px;
-  height: 44px;
+  width: 100%;
+  /* Zen-style: a WIDE rounded rectangle, not a square box. The tile fills its
+     grid column (~65px) and stays ~46px tall. */
+  aspect-ratio: 1.4 / 1;
+  height: auto;
+  padding: 0;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 11px;
+  border-radius: 10px;
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
@@ -601,8 +615,8 @@ body.platform-linux .topbar {
 }
 
 .tab-favicon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -623,6 +637,7 @@ body.platform-linux .topbar {
 
 .tab-title {
   flex: 1;
+  font-size: 13.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -673,7 +688,6 @@ body.platform-linux .topbar {
   justify-content: space-between;
   padding: 8px;
   margin-top: 2px;
-  border-top: 1px solid var(--divider);
 }
 
 .space-dots {
@@ -1939,4 +1953,41 @@ body {
 }
 .update-pill:hover {
   filter: brightness(1.08);
+}
+
+/* --- Data-durability UI: crash screen + backup controls ------------------- */
+.crash {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 20px 18px;
+  height: 100%;
+  box-sizing: border-box;
+}
+.crash-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.crash-msg {
+  font-size: 12px;
+  color: var(--text-dim);
+  word-break: break-word;
+  max-height: 40vh;
+  overflow: auto;
+}
+.crash-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.settings-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.row-desc.danger {
+  color: #e05656;
 }

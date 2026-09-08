@@ -59,7 +59,7 @@ export function Favorites({ pinnedTabs, activeTabId }: Props): JSX.Element {
             }}
           >
             {tab.favicon ? (
-              <img src={tab.favicon} alt="" width={20} height={20} />
+              <img src={tab.favicon} alt="" width={22} height={22} />
             ) : (
               <span className="fav-fallback">{label.charAt(0).toUpperCase()}</span>
             )}

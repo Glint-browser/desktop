@@ -1,7 +1,7 @@
 From c1ce281fc5571d4f34e906692e644e769f589f73 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Wed, 12 Aug 2026 09:56:13 +0200
-Subject: [PATCH 44/66] Glint: real Glint app icon and product logos (purple
+Subject: [PATCH 44/67] Glint: real Glint app icon and product logos (purple
  sparkle), replacing Chromium's
 
 ---

@@ -1,7 +1,7 @@
 From e2d935274f834109d894982231cd6ea820ddd836 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Sun, 5 Jul 2026 23:24:47 +0200
-Subject: [PATCH 09/66] Glint: sidebar address bar shows + syncs the active
+Subject: [PATCH 09/67] Glint: sidebar address bar shows + syncs the active
  tab's URL
 
 ---

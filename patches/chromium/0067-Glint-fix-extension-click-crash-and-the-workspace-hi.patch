@@ -1,0 +1,198 @@
+From 1abab96865bb5f82ba4683f9f12609cf291661a8 Mon Sep 17 00:00:00 2001
+From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
+Date: Tue, 8 Sep 2026 14:17:35 +0200
+Subject: [PATCH 67/67] Glint: fix extension-click crash and the workspace
+ hijack; Zen-style palette
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Three native fixes:
+
+1. Extension toolbar clicks crashed the whole browser (SIGSEGV) whenever a
+   `/profile` tab was active. ExtensionActionRunner takes its profile from the
+   ACTIVE TAB's WebContents, but the clicked button belongs to the WINDOW's
+   profile; for a glint-* profile tab the extension is not installed there, so
+   GetExtensionAction() returns null. Upstream only DCHECKs, which is compiled
+   out in release builds -> null deref in GetIsVisibleInternal. Null-check and
+   no-op instead (running it would break profile isolation).
+
+2. The pre-web-UI native sidebar was still live: VerticalTabStripRegionView is
+   constructed for every window even though it is never laid out, and its
+   GlintAdoptOrphanTabs() kept unpinning tabs and yanking new ones into a stuck
+   native "Personal" group — fighting the extension's own grouping, flipping
+   the active workspace to Personal and spawning phantom "Space N" workspaces.
+   Disabled behind a static-volatile guard.
+
+3. Command palette rows now show the dimmed inline URL next to the title
+   (Zen-style), lead the input with a search glyph, and label tab hits
+   "Switch to Tab".
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ .../extensions/extension_action_runner.cc     | 15 +++++-
+ .../frame/vertical_tab_strip_region_view.cc   | 13 +++++
+ .../ui/views/glint/glint_command_palette.cc   | 52 ++++++++++++++++---
+ 3 files changed, 71 insertions(+), 9 deletions(-)
+
+diff --git a/chrome/browser/extensions/extension_action_runner.cc b/chrome/browser/extensions/extension_action_runner.cc
+index cb8b2511d0..dafc4d112a 100644
+--- a/chrome/browser/extensions/extension_action_runner.cc
++++ b/chrome/browser/extensions/extension_action_runner.cc
+@@ -127,7 +127,20 @@ ExtensionAction::ShowAction ExtensionActionRunner::RunAction(
+   ExtensionAction* extension_action =
+       ExtensionActionManager::Get(browser_context_)
+           ->GetExtensionAction(*extension);
+-  DCHECK(extension_action);
++  // Glint: this runner's profile comes from the ACTIVE TAB's WebContents, but
++  // the clicked toolbar button belongs to the WINDOW's profile. Glint's
++  // `/profile <name>` tabs put a WebContents from another (glint-*) profile
++  // into a Default-profile window, so the extension is not installed in the
++  // tab's profile and GetExtensionAction() returns null. Upstream only has a
++  // DCHECK here, which is compiled out in release builds -> clicking ANY
++  // extension button while a profile tab is active dereferenced null and took
++  // the whole browser down (crbug-style SIGSEGV in GetIsVisibleInternal).
++  // Running the action anyway is not an option: it would let an extension from
++  // one profile act on another profile's page, breaking session isolation.
++  // No-op instead.
++  if (!extension_action) {
++    return ExtensionAction::ShowAction::kNone;
++  }
+ 
+   if (!extension_action->GetIsVisible(tab_id)) {
+     return ExtensionAction::ShowAction::kNone;
+diff --git a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+index 82a7779453..5b29198d2b 100644
+--- a/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ b/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -1558,6 +1558,19 @@ std::optional<int> VerticalTabStripRegionView::GlintSpaceIndexAtScreenPoint(
+ }
+ 
+ void VerticalTabStripRegionView::GlintAdoptOrphanTabs() {
++  // Glint: DISABLED. The Glint UI side-panel extension is now the SINGLE owner
++  // of tab<->workspace grouping (background.ts adoption + workspaces.ts
++  // reconcile). This native adopter predates that architecture; running in
++  // parallel it yanked new tabs into a stuck native "Personal" group and
++  // unpinned tabs, fighting the extension and flipping the active workspace to
++  // Personal (and spawning phantom "Space N" workspaces). The native vertical
++  // sidebar is never laid out (GetTabStripType()==kNone), so nothing here is
++  // needed. The static-volatile guard returns before any tab-strip mutation
++  // while keeping the rest compiled (avoids -Wunreachable-code).
++  static volatile bool kGlintNativeAdoptDisabled = true;
++  if (kGlintNativeAdoptDisabled) {
++    return;
++  }
+   if (!glint_browser_ || glint_spaces_.empty()) {
+     return;
+   }
+diff --git a/chrome/browser/ui/views/glint/glint_command_palette.cc b/chrome/browser/ui/views/glint/glint_command_palette.cc
+index 0c0dc23779..61f93451be 100644
+--- a/chrome/browser/ui/views/glint/glint_command_palette.cc
++++ b/chrome/browser/ui/views/glint/glint_command_palette.cc
+@@ -80,6 +80,7 @@
+ #include "components/history/core/browser/history_service.h"
+ #include "components/history/core/browser/history_types.h"
+ #include "components/url_formatter/url_fixer.h"
++#include "components/url_formatter/url_formatter.h"
+ #include "components/vector_icons/vector_icons.h"
+ #include "content/public/browser/web_contents.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
+@@ -224,13 +225,14 @@ class PaletteRow : public views::Button {
+   PaletteRow(PressedCallback callback,
+              const ui::ImageModel& icon,
+              const std::u16string& label,
++             const std::u16string& url_text,
+              const std::u16string& meta,
+              bool selected,
+              const GlintPaletteColors& colors)
+       : views::Button(std::move(callback)) {
+     auto* layout = SetLayoutManager(std::make_unique<views::BoxLayout>(
+         views::BoxLayout::Orientation::kHorizontal,
+-        gfx::Insets::TLBR(0, 14, 0, 14), 12));
++        gfx::Insets::TLBR(0, 14, 0, 14), 8));
+     layout->set_cross_axis_alignment(
+         views::BoxLayout::CrossAxisAlignment::kCenter);
+ 
+@@ -242,7 +244,18 @@ class PaletteRow : public views::Button {
+     title->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+     title->SetElideBehavior(gfx::ELIDE_TAIL);
+     title->SetEnabledColor(colors.text);
+-    layout->SetFlexForView(title, 1);
++    layout->SetFlexForView(title, 2);
++
++    // Glint: Zen-style dimmed inline url ("portal.procano.com/app/…") right
++    // after the title, so results are identifiable by site, not just title.
++    if (!url_text.empty()) {
++      auto* url = AddChildView(std::make_unique<views::Label>(
++          url_text, views::style::CONTEXT_LABEL, views::style::STYLE_SECONDARY));
++      url->SetHorizontalAlignment(gfx::ALIGN_LEFT);
++      url->SetElideBehavior(gfx::ELIDE_HEAD);
++      url->SetEnabledColor(colors.text_dim);
++      layout->SetFlexForView(url, 3);
++    }
+ 
+     auto* meta_label = AddChildView(std::make_unique<views::Label>(
+         meta, views::style::CONTEXT_LABEL, views::style::STYLE_SECONDARY));
+@@ -283,13 +296,28 @@ class GlintCommandPaletteView : public LocationBarBubbleDelegateView,
+     SetLayoutManager(std::make_unique<views::BoxLayout>(
+         views::BoxLayout::Orientation::kVertical));
+ 
+-    input_ = AddChildView(std::make_unique<views::Textfield>());
++    // Glint: Zen-style search row — a magnifier glyph leading the input.
++    auto* input_row = AddChildView(std::make_unique<views::View>());
++    auto* input_layout =
++        input_row->SetLayoutManager(std::make_unique<views::BoxLayout>(
++            views::BoxLayout::Orientation::kHorizontal,
++            gfx::Insets::TLBR(0, 20, 0, 20), 12));
++    input_layout->set_cross_axis_alignment(
++        views::BoxLayout::CrossAxisAlignment::kCenter);
++    input_row->SetPreferredSize(gfx::Size(kPaletteWidth, kInputHeight));
++
++    auto* search_icon =
++        input_row->AddChildView(std::make_unique<views::ImageView>());
++    search_icon->SetImage(ui::ImageModel::FromVectorIcon(
++        vector_icons::kSearchIcon, colors_.text_dim, 18));
++
++    input_ = input_row->AddChildView(std::make_unique<views::Textfield>());
+     input_->set_controller(this);
+     input_->SetPlaceholderText(u"Search tabs, enter a URL, or search the web…");
+     input_->SetBackgroundColor(SK_ColorTRANSPARENT);
+-    input_->SetBorder(views::CreateEmptyBorder(gfx::Insets::VH(0, 20)));
++    input_->SetBorder(views::CreateEmptyBorder(gfx::Insets()));
+     input_->SetFontList(gfx::FontList().DeriveWithSizeDelta(4));
+-    input_->SetPreferredSize(gfx::Size(kPaletteWidth, kInputHeight));
++    input_layout->SetFlexForView(input_, 1);
+ 
+     separator_ = AddChildView(std::make_unique<views::Separator>());
+ 
+@@ -493,7 +521,7 @@ class GlintCommandPaletteView : public LocationBarBubbleDelegateView,
+       const gfx::Image favicon = favicon::TabFaviconFromWebContents(contents);
+       rows_.push_back({Row::Type::kTab,
+                        title.empty() ? base::UTF8ToUTF16(url.spec()) : title,
+-                       u"Switch", url, i,
++                       u"Switch to Tab", url, i,
+                        favicon.IsEmpty()
+                            ? VectorIcon(vector_icons::kGlobeIcon)
+                            : ui::ImageModel::FromImage(favicon)});
+@@ -612,11 +640,19 @@ class GlintCommandPaletteView : public LocationBarBubbleDelegateView,
+   void RebuildList() {
+     list_->RemoveAllChildViews();
+     for (size_t i = 0; i < rows_.size(); ++i) {
++      std::u16string url_text;
++      if (rows_[i].url.is_valid() && rows_[i].url.has_host()) {
++        url_text = url_formatter::FormatUrl(
++            rows_[i].url,
++            url_formatter::kFormatUrlOmitDefaults |
++                url_formatter::kFormatUrlOmitHTTPS,
++            base::UnescapeRule::SPACES, nullptr, nullptr, nullptr);
++      }
+       list_->AddChildView(std::make_unique<PaletteRow>(
+           base::BindRepeating(&GlintCommandPaletteView::ExecuteRow,
+                               base::Unretained(this), i),
+-          rows_[i].icon, rows_[i].label, rows_[i].meta, i == selected_,
+-          colors_));
++          rows_[i].icon, rows_[i].label, url_text, rows_[i].meta,
++          i == selected_, colors_));
+     }
+     if (GetWidget()) {
+       SizeToContents();

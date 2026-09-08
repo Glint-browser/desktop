@@ -1,7 +1,7 @@
 From e83477a968fea700aaeff7e24a96bb1cc22d6122 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Sun, 5 Jul 2026 23:45:09 +0200
-Subject: [PATCH 11/66] Glint: folder icon on workspace header + hide default
+Subject: [PATCH 11/67] Glint: folder icon on workspace header + hide default
  control-icon row
 
 ---

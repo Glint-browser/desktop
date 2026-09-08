@@ -1,7 +1,7 @@
 From 65ffd98ebc86e535ec155d531ca882f9e938ff11 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 13:48:43 +0200
-Subject: [PATCH 28/66] Glint: restore light margin on right + bottom of web
+Subject: [PATCH 28/67] Glint: restore light margin on right + bottom of web
  content (reference design)
 
 ---

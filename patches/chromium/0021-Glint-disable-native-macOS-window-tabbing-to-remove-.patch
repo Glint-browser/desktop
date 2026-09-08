@@ -1,7 +1,7 @@
 From 9dbbfe16489760a399f6de564a781b6c90d8eb78 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Mon, 20 Jul 2026 13:06:24 +0200
-Subject: [PATCH 21/66] Glint: disable native macOS window tabbing to remove
+Subject: [PATCH 21/67] Glint: disable native macOS window tabbing to remove
  AppKit's own tab-bar affordances near the traffic lights
 
 ---

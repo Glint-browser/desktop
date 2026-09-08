@@ -1,7 +1,7 @@
 From 0e539724353c649ab3dca921c34ebc720fe9e369 Mon Sep 17 00:00:00 2001
 From: Glint <glint@localhost>
 Date: Tue, 21 Jul 2026 10:29:19 +0200
-Subject: [PATCH 26/66] Glint: top container paints frame color with vertical
+Subject: [PATCH 26/67] Glint: top container paints frame color with vertical
  tabs - fixes white notch behind traffic lights
 
 ---

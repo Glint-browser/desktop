@@ -1,7 +1,7 @@
 From 1717781c4ded97df3cbe0a95fa67aec7e9314e4e Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Tue, 18 Aug 2026 12:13:25 +0200
-Subject: [PATCH 64/66] Glint: security hardening of the glint:// bridge and
+Subject: [PATCH 64/67] Glint: security hardening of the glint:// bridge and
  self-updater
 
 Audit found the privileged glint:// actions reachable from any web page.

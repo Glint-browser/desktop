@@ -11,6 +11,7 @@ import {
   Trash
 } from '@phosphor-icons/react'
 import type { AppSettings, ExtensionInfo, SearchEngine, ThemeSource , UpdateStatus } from '../types'
+import { exportBackupJson, importBackupJson } from '../lib/backup'
 
 // Vivaldi-style settings: a full-window page with a searchable category rail,
 // ALL-CAPS section headers with rules, and grouped controls — rendered in the
@@ -324,6 +325,74 @@ function GeneralPane(): JSX.Element {
           </VGroup>
         </VGrid>
       </VSection>
+      <VSection title="BACKUP & RESTORE">
+        <VGrid>
+          <VGroup label="Your spaces & pins">
+            <BackupRow />
+          </VGroup>
+        </VGrid>
+      </VSection>
+    </>
+  )
+}
+
+function BackupRow(): JSX.Element {
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+
+  const doExport = async (): Promise<void> => {
+    try {
+      const json = await exportBackupJson()
+      const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }))
+      const a = document.createElement('a')
+      const stamp = new Date().toISOString().slice(0, 10)
+      a.href = url
+      a.download = `glint-backup-${stamp}.json`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      setMsg({ kind: 'ok', text: 'Backup downloaded.' })
+    } catch {
+      setMsg({ kind: 'err', text: 'Could not export.' })
+    }
+  }
+
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    try {
+      const b = await importBackupJson(await file.text())
+      setMsg({ kind: 'ok', text: `Restored ${b.workspaces.length} spaces. Reopening…` })
+      setTimeout(() => window.location.reload(), 900)
+    } catch (err) {
+      setMsg({ kind: 'err', text: err instanceof Error ? err.message : 'Import failed.' })
+    }
+  }
+
+  return (
+    <>
+      <div className="row-desc">
+        Export your workspaces, pins and settings to a file, or restore them from
+        one. Glint also keeps an automatic backup that survives a crash.
+      </div>
+      <div className="settings-btn-row">
+        <button className="settings-btn" onClick={() => void doExport()}>
+          Export backup…
+        </button>
+        <label className="settings-btn" style={{ cursor: 'pointer' }}>
+          Import backup…
+          <input
+            type="file"
+            accept="application/json,.json"
+            style={{ display: 'none' }}
+            onChange={(e) => void onFile(e)}
+          />
+        </label>
+      </div>
+      {msg && (
+        <div className={`row-desc${msg.kind === 'err' ? ' danger' : ''}`}>{msg.text}</div>
+      )}
     </>
   )
 }

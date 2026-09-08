@@ -51,7 +51,7 @@ export function TabItem({
         {tab.isLoading ? (
           <span className="spinner" />
         ) : tab.favicon ? (
-          <img src={tab.favicon} alt="" width={16} height={16} />
+          <img src={tab.favicon} alt="" width={18} height={18} />
         ) : (
           <span className="favicon-fallback" />
         )}

@@ -1,7 +1,7 @@
 From 06bddc08a1b0b8ffec7751e0cb07b3e11ed68455 Mon Sep 17 00:00:00 2001
 From: Mathias <77238760+MathiasMortus@users.noreply.github.com>
 Date: Tue, 18 Aug 2026 13:53:56 +0200
-Subject: [PATCH 65/66] Glint: continuous profile-tag tracker (survives
+Subject: [PATCH 65/67] Glint: continuous profile-tag tracker (survives
  redirects) + per-window active
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
